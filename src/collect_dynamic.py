@@ -11,7 +11,13 @@ BASE_URL = "https://api.upstox.com/v2"
 
 NIFTY_KEY = "NSE_INDEX|Nifty 50"
 
-EXPIRY_DATE = "2025-09-23"
+TEST_DATES = [
+    "2025-09-23",
+    "2025-09-16",
+    "2025-09-09",
+    "2025-09-02",
+    "2025-08-28",
+]
 
 TIMEFRAME = "5minute"
 
@@ -32,11 +38,11 @@ HEADERS = {
 def get_nifty_candles(date):
 
     url = (
-        f"{BASE_URL}/historical-candle/"
-        f"{NIFTY_KEY}/1minute/"
-        f"{date}/"
-        f"{date}"
-    )
+    f"{BASE_URL}/historical-candle/"
+    f"{NIFTY_KEY}/1minute/"
+    f"{date}/"
+    f"{date}"
+    ) 
 
     response = requests.get(
         url,
@@ -111,8 +117,8 @@ def get_expired_contracts(expiry_date):
     )
 
     params = {
-        "instrument_key": NIFTY_KEY,
-        "expiry_date": expiry_date
+    "instrument_key": NIFTY_KEY,
+    "expiry_date": expiry_date
     }
 
     response = requests.get(
@@ -336,17 +342,42 @@ def clean_data(df):
 
     return df
 
+def collect_one_date(date):
+    """
+    Collect dynamic ATM option data for one historical date.
+    """
 
+    print()
+    print("=" * 70)
+    print(f"COLLECTING DATE: {date}")
+    print("=" * 70)
 
-if __name__ == "__main__":
-
-    print("DYNAMIC NIFTY OPTIONS COLLECTOR")
-
-    # NIFTY
-
-    nifty_candles = get_nifty_candles(
-        EXPIRY_DATE
+    output_file = (
+        f"{OUTPUT_DIR}/"
+        f"dynamic_options_{date}.parquet"
     )
+
+    
+    # Resume protection
+    
+
+    if os.path.exists(output_file):
+
+        print("Already exists:")
+        print(output_file)
+        print("Skipping this date.")
+
+        return {
+            "date": date,
+            "status": "already_exists",
+            "rows": None
+        }
+
+    
+    # 1. NIFTY
+    
+
+    nifty_candles = get_nifty_candles(date)
 
     nifty_df = nifty_to_dataframe(
         nifty_candles
@@ -366,10 +397,12 @@ if __name__ == "__main__":
         spot
     )
 
-    # CONTRACTS
+    
+    # 2. OPTIONS
+    
 
     contracts = get_expired_contracts(
-        EXPIRY_DATE
+        date
     )
 
     options = filter_options(
@@ -381,7 +414,9 @@ if __name__ == "__main__":
         len(options)
     )
 
-    # ATM
+    
+    # 3. DYNAMIC ATM
+    
 
     atm, strikes = find_atm_strike(
         options,
@@ -404,7 +439,9 @@ if __name__ == "__main__":
         selected_strikes
     )
 
-    # SELECT CONTRACTS
+    
+    # 4. SELECT CONTRACTS
+    
 
     selected_contracts = [
         contract
@@ -418,15 +455,11 @@ if __name__ == "__main__":
         len(selected_contracts)
     )
 
-    print(
-        "Expected:",
-        len(selected_strikes) * 2
-    )
-
-    # DOWNLOAD
+    
+    # 5. DOWNLOAD OPTION DATA
+    
 
     all_data = []
-
     failed = []
 
     for i, contract in enumerate(
@@ -439,69 +472,94 @@ if __name__ == "__main__":
             contract.get("trading_symbol")
         )
 
-        candles = get_option_candles(
-            contract["instrument_key"],
-            EXPIRY_DATE
-        )
+        try:
 
-        if not candles:
+            candles = get_option_candles(
+                contract["instrument_key"],
+                date
+            )
+
+            if not candles:
+
+                failed.append(
+                    contract["instrument_key"]
+                )
+
+                continue
+
+            df = candles_to_dataframe(
+                candles,
+                contract,
+                date
+            )
+
+            all_data.append(df)
+
+        except Exception as e:
+
+            print(
+                "ERROR:",
+                contract["instrument_key"],
+                e
+            )
 
             failed.append(
                 contract["instrument_key"]
             )
 
-            continue
-
-        df = candles_to_dataframe(
-            candles,
-            contract,
-            EXPIRY_DATE
-        )
-
-        all_data.append(df)
-
-    # COMBINE
+    
+    # 6. CHECK DATA
+    
 
     if not all_data:
 
-        raise ValueError(
-            "No option data downloaded."
+        print(
+            "NO OPTION DATA FOR:",
+            date
         )
+
+        return {
+            "date": date,
+            "status": "failed",
+            "rows": 0
+        }
+
+    
+    # 7. COMBINE
+    
 
     options_df = pd.concat(
         all_data,
         ignore_index=True
     )
 
-    print()
     print(
         "Raw option rows:",
         len(options_df)
     )
 
-    # ATTACH NIFTY
+    
+    # 8. ATTACH NIFTY
+    
 
     options_df = attach_spot(
         options_df,
         nifty_df
     )
 
-    # CLEAN
+    
+    # 9. CLEAN
+    
 
     options_df = clean_data(
         options_df
     )
 
-    # SAVE
+    # 10. SAVE
 
     os.makedirs(
         OUTPUT_DIR,
         exist_ok=True
-    )
-
-    output_file = (
-        f"{OUTPUT_DIR}/"
-        f"dynamic_options_{EXPIRY_DATE}.parquet"
     )
 
     options_df.to_parquet(
@@ -510,7 +568,8 @@ if __name__ == "__main__":
     )
 
     print()
-    print("COMPLETE")
+    print("Saved:")
+    print(output_file)
 
     print(
         "Final rows:",
@@ -518,21 +577,82 @@ if __name__ == "__main__":
     )
 
     print(
-        "Final columns:",
-        len(options_df.columns)
-    )
-
-    print(
-        "NIFTY spot missing:",
-        options_df["nifty_spot"].isna().sum()
-    )
-
-    print(
         "Failed contracts:",
         len(failed)
     )
 
-    print(
-        "Saved:",
-        output_file
+    return {
+        "date": date,
+        "status": "success",
+        "rows": len(options_df),
+        "contracts": len(selected_contracts),
+        "failed": len(failed),
+        "atm": atm
+    }
+
+if __name__ == "__main__":
+
+    print("=" * 70)
+    print("MULTI-DATE DYNAMIC NIFTY OPTIONS COLLECTOR")
+    print("=" * 70)
+
+    os.makedirs(
+        OUTPUT_DIR,
+        exist_ok=True
     )
+
+    results = []
+
+    for date in TEST_DATES:
+
+        try:
+
+            result = collect_one_date(
+                date
+            )
+
+            results.append(
+                result
+            )
+
+        except Exception as e:
+
+            print()
+            print(
+                f"FAILED DATE: {date}"
+            )
+
+            print(
+                "ERROR:",
+                e
+            )
+
+            results.append(
+                {
+                    "date": date,
+                    "status": "error",
+                    "rows": 0
+                }
+            )
+
+    
+    # SUMMARY
+    
+
+    print()
+    print("=" * 70)
+    print("COLLECTION SUMMARY")
+    print("=" * 70)
+
+    results_df = pd.DataFrame(
+        results
+    )
+
+    print(
+        results_df.to_string(
+            index=False
+        )
+    )
+
+    print()
+    print("Dates processed:", len(results))
