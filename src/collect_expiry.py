@@ -1,149 +1,97 @@
-import sys
-from pathlib import Path
-
 import pandas as pd
 
-
-
-# PATH SETUP
-
-
-SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
-
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-
 from config import (
-    TEST_EXPIRY,
-    TEST_FROM_DATE,
-    TEST_TO_DATE,
-    RAW_UPSTOX_DIR,
-)
-
-from upstox_api import (
-    get_expired_candles,
+    UPSTOX_RAW_DIR,
+    OPTION_TIMEFRAME,
 )
 
 from prepare_expiry import (
     prepare_expiry,
 )
 
+from upstox_api import (
+    get_expired_candles,
+)
 
 
-# OPTION CANDLES → DATAFRAME
-
-
-def candles_to_dataframe(
-    candles,
-    contract,
-):
-    """
-    Convert Upstox option candles into DataFrame.
-    """
-
-    if not candles:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
-        candles,
-        columns=[
-            "timestamp",
-            "open",
-            "high",
-            "low",
-            "close",
-            "volume",
-            "open_interest",
-        ],
-    )
-
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"]
-    )
-
-    df["instrument_key"] = contract[
-        "instrument_key"
-    ]
-
-    df["trading_symbol"] = contract[
-        "trading_symbol"
-    ]
-
-    df["expiry"] = pd.to_datetime(
-        contract["expiry"]
-    )
-
-    df["strike"] = float(
-        contract["strike_price"]
-    )
-
-    df["option_type"] = contract[
-        "instrument_type"
-    ]
-
-    df["lot_size"] = int(
-        contract["lot_size"]
-    )
-
-    return df
-
-
-
+# ============================================================
 # COLLECT ONE EXPIRY
-
+# ============================================================
 
 def collect_expiry(
     expiry_date,
-    from_date,
-    to_date,
+    number_of_sessions=5,
 ):
-    print()
-    print("=" * 70)
-    print("COLLECT EXPIRY")
-    print("=" * 70)
+    """
+    Collect exactly N trading sessions for one expiry.
 
-    print("Expiry:", expiry_date)
-    print("Window:", from_date, "→", to_date)
+    Dynamic strike selection is performed independently
+    for every trading session.
+    """
+
+    print()
+    print("=" * 80)
+    print(
+        f"COLLECTING EXPIRY: {expiry_date}"
+    )
+    print("=" * 80)
 
     # --------------------------------------------------------
-    # Prepare daily strike universe
+    # Prepare expiry
     # --------------------------------------------------------
 
     prepared = prepare_expiry(
         expiry_date,
-        from_date,
-        to_date,
+        number_of_sessions,
     )
 
-    contracts = prepared[
-        "required_contracts"
+    trading_dates = prepared[
+        "trading_dates"
     ]
 
-    daily_info = prepared[
-        "daily_info"
+    required_contracts = prepared[
+        "contracts"
     ]
+
+    daily_selection = prepared[
+        "daily_selection"
+    ]
+
+    nifty_data = prepared[
+        "nifty_data"
+    ]
+
+    # --------------------------------------------------------
+    # Date range
+    # --------------------------------------------------------
+
+    from_date = trading_dates[0]
+
+    to_date = trading_dates[-1]
+
+    print()
+    print(
+        f"Historical window:"
+        f" {from_date} → {to_date}"
+    )
 
     # --------------------------------------------------------
     # Download option candles
     # --------------------------------------------------------
 
-    all_frames = []
-    failed = []
+    option_frames = []
+
+    failed_contracts = []
 
     print()
-    print("=" * 70)
-    print("DOWNLOADING OPTION DATA")
-    print("=" * 70)
-
     print(
-        "Contracts to download:",
-        len(contracts)
+        f"Downloading "
+        f"{len(required_contracts)} "
+        f"contracts..."
     )
 
     for index, contract in enumerate(
-        contracts,
+        required_contracts,
         start=1,
     ):
 
@@ -151,13 +99,23 @@ def collect_expiry(
             "instrument_key"
         ]
 
-        symbol = contract[
-            "trading_symbol"
+        strike = float(
+            contract["strike_price"]
+        )
+
+        option_type = contract[
+            "instrument_type"
         ]
 
+        trading_symbol = contract.get(
+            "trading_symbol",
+            "",
+        )
+
         print(
-            f"[{index}/{len(contracts)}] "
-            f"{symbol}"
+            f"[{index}/"
+            f"{len(required_contracts)}] "
+            f"{trading_symbol}"
         )
 
         try:
@@ -168,144 +126,148 @@ def collect_expiry(
                 to_date,
             )
 
-            df = candles_to_dataframe(
-                candles,
-                contract,
-            )
-
-            if df.empty:
+            if not candles:
 
                 print(
-                    "   WARNING: no candles"
+                    "  WARNING: no candles"
                 )
 
-                failed.append(
-                    {
-                        "instrument_key":
-                            instrument_key,
-                        "trading_symbol":
-                            symbol,
-                        "reason":
-                            "no candles",
-                    }
+                failed_contracts.append(
+                    instrument_key
                 )
 
                 continue
 
-            all_frames.append(df)
-
-            print(
-                "   rows:",
-                len(df)
+            df = pd.DataFrame(
+                candles,
+                columns=[
+                    "timestamp",
+                    "open",
+                    "high",
+                    "low",
+                    "close",
+                    "volume",
+                    "open_interest",
+                ],
             )
+
+            if df.empty:
+                continue
+
+            df["timestamp"] = pd.to_datetime(
+                df["timestamp"]
+            )
+
+            df["instrument_key"] = (
+                instrument_key
+            )
+
+            df["trading_symbol"] = (
+                trading_symbol
+            )
+
+            df["expiry"] = pd.to_datetime(
+                expiry_date
+            )
+
+            df["strike"] = strike
+
+            df["option_type"] = (
+                option_type
+            )
+
+            df["lot_size"] = int(
+                contract.get(
+                    "lot_size",
+                    0,
+                )
+            )
+
+            option_frames.append(df)
 
         except Exception as e:
 
             print(
-                "   FAILED:",
-                e
+                f"  ERROR: {e}"
             )
 
-            failed.append(
-                {
-                    "instrument_key":
-                        instrument_key,
-                    "trading_symbol":
-                        symbol,
-                    "reason":
-                        str(e),
-                }
+            failed_contracts.append(
+                instrument_key
             )
 
-    if not all_frames:
+    # --------------------------------------------------------
+    # Make option dataframe
+    # --------------------------------------------------------
+
+    if not option_frames:
+
         raise RuntimeError(
-            "No option data collected."
+            f"No option data collected "
+            f"for {expiry_date}"
         )
 
     options_df = pd.concat(
-        all_frames,
+        option_frames,
         ignore_index=True,
     )
 
     # --------------------------------------------------------
-    # Remove duplicates
+    # Remove duplicate candles
     # --------------------------------------------------------
 
-    options_df = options_df.drop_duplicates(
-        subset=[
-            "instrument_key",
-            "timestamp",
-        ]
+    options_df = (
+        options_df
+        .drop_duplicates(
+            subset=[
+                "instrument_key",
+                "timestamp",
+            ]
+        )
+        .sort_values(
+            [
+                "instrument_key",
+                "timestamp",
+            ]
+        )
+        .reset_index(drop=True)
+    )
+
+    print()
+    print(
+        f"Raw option rows: "
+        f"{len(options_df):,}"
+    )
+
+    print(
+        f"Contracts with data: "
+        f"{options_df['instrument_key'].nunique()}"
     )
 
     # --------------------------------------------------------
-    # Download NIFTY
+    # Build NIFTY dataframe
     # --------------------------------------------------------
-
-    print()
-    print("=" * 70)
-    print("DOWNLOADING NIFTY DATA")
-    print("=" * 70)
 
     nifty_frames = []
 
-    for day in daily_info:
+    for date in trading_dates:
 
-        date = day["date"]
-
-        print(
-            "Downloading NIFTY:",
+        nifty_df = nifty_data.get(
             date
         )
 
-        from upstox_api import (
-            get_nifty_candles
-        )
-
-        candles = get_nifty_candles(
-            date
-        )
-
-        if not candles:
-            print(
-                "   WARNING: no NIFTY data"
-            )
+        if nifty_df is None:
             continue
 
-        df = pd.DataFrame(
-            candles,
-            columns=[
-                "timestamp",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "open_interest",
-            ],
-        )
+        temp = nifty_df.copy()
 
-        df["timestamp"] = pd.to_datetime(
-            df["timestamp"]
-        )
+        temp["trade_date"] = date
 
-        nifty_frames.append(
-            df[
-                [
-                    "timestamp",
-                    "close",
-                ]
-            ].rename(
-                columns={
-                    "close":
-                        "nifty_spot"
-                }
-            )
-        )
+        nifty_frames.append(temp)
 
     if not nifty_frames:
+
         raise RuntimeError(
-            "No NIFTY data collected."
+            "No NIFTY data available."
         )
 
     nifty_df = pd.concat(
@@ -313,74 +275,171 @@ def collect_expiry(
         ignore_index=True,
     )
 
-    nifty_df = nifty_df.drop_duplicates(
-        subset=["timestamp"]
+    nifty_df = nifty_df[
+        [
+            "timestamp",
+            "close",
+        ]
+    ].rename(
+        columns={
+            "close": "nifty_spot"
+        }
     )
 
     # --------------------------------------------------------
-    # Merge
+    # Align NIFTY spot to option timestamps
     # --------------------------------------------------------
 
-    print()
-    print("=" * 70)
-    print("MERGING OPTION + NIFTY DATA")
-    print("=" * 70)
+# Options data = 5-minute candles
+# NIFTY data    = 1-minute candles
+#
+# IMPORTANT:
+# The option API may contain a 15:35 candle, while
+# NIFTY spot data does not have a corresponding candle.
+#
+# Therefore, remove option timestamps that occur after
+# the last available NIFTY timestamp FOR THAT DAY.
 
-    merged = options_df.merge(
-        nifty_df,
-        on="timestamp",
+    options_df = options_df.sort_values(
+        "timestamp"
+    ).reset_index(drop=True)
+
+    nifty_df = nifty_df.sort_values(
+        "timestamp"
+    ).reset_index(drop=True)
+
+# Add trading date to both datasets
+    options_df["trade_date"] = (
+        options_df["timestamp"]
+        .dt.date
+        .astype(str)
+    )
+
+    nifty_df["trade_date"] = (
+        nifty_df["timestamp"]
+        .dt.date
+        .astype(str)
+    )
+
+# Find the last available NIFTY timestamp for each day
+    last_nifty_time = (
+        nifty_df
+        .groupby("trade_date")["timestamp"]
+        .max()
+        .rename("last_nifty_timestamp")
+    )
+
+# Attach the daily cutoff to option rows
+    options_df = options_df.merge(
+        last_nifty_time,
+        on="trade_date",
         how="left",
     )
 
-    # --------------------------------------------------------
-    # Daily dynamic strike filtering
-    # --------------------------------------------------------
+# Keep only option candles that have an actual NIFTY
+# observation available for that same trading session
+    options_df = options_df[
+        options_df["timestamp"]
+        <= options_df["last_nifty_timestamp"]
+        ].copy()
 
-    print()
-    print(
-        "Applying daily dynamic strike filter..."
+    options_df = options_df.drop(
+    columns=["last_nifty_timestamp"]
     )
 
-    filtered_parts = []
+# Remove temporary trade_date because it will be
+# recreated later
+    options_df = options_df.drop(
+        columns=["trade_date"]
+    )
 
-    for day in daily_info:
+    nifty_df = nifty_df.drop(
+        columns=["trade_date"]
+    )
 
-        date = day["date"]
+# Final timestamp alignment
+    merged = pd.merge_asof(
+        options_df.sort_values("timestamp"),
+        nifty_df.sort_values("timestamp"),
+        on="timestamp",
+        direction="backward",
+        tolerance=pd.Timedelta(minutes=1),
+    )
+# --------------------------------------------------------
+# Remove option candles after the NIFTY trading session
+# --------------------------------------------------------
+# Upstox expired option data can contain a 15:35 candle,
+# while NIFTY spot data ends before that timestamp.
+#
+# We do not want to invent/fill a NIFTY spot value for it.
+# Therefore keep only option timestamps that can be
+# matched to actual NIFTY data.
 
-        selected_strikes = set(
+    latest_nifty_timestamp = nifty_df["timestamp"].max()
+
+    options_df = options_df[
+        options_df["timestamp"] <= latest_nifty_timestamp
+    ].copy()
+
+# --------------------------------------------------------
+# Align NIFTY spot to option timestamps
+# --------------------------------------------------------
+
+    merged = pd.merge_asof(
+        options_df,
+        nifty_df,
+        on="timestamp",
+        direction="backward",
+        tolerance=pd.Timedelta(minutes=1),
+)
+    # --------------------------------------------------------
+    # Daily dynamic strike filter
+    # --------------------------------------------------------
+
+    selection_map = {}
+
+    for item in daily_selection:
+
+        selection_map[
+            item["date"]
+        ] = set(
             float(x)
-            for x in day[
+            for x in item[
                 "selected_strikes"
             ]
         )
 
-        date_mask = (
-            merged["timestamp"]
-            .dt.strftime("%Y-%m-%d")
-            == date
-        )
-
-        strike_mask = (
-            merged["strike"]
-            .isin(selected_strikes)
-        )
-
-        part = merged[
-            date_mask & strike_mask
-        ].copy()
-
-        filtered_parts.append(part)
-
-    final_df = pd.concat(
-        filtered_parts,
-        ignore_index=True,
+    merged["trade_date"] = (
+        merged["timestamp"]
+        .dt.date
+        .astype(str)
     )
+
+    merged = merged[
+        merged.apply(
+            lambda row:
+                float(row["strike"])
+                in selection_map.get(
+                    row["trade_date"],
+                    set(),
+                ),
+            axis=1,
+        )
+    ].copy()
+
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # 09:15 is retained in RAW dataset.
+    #
+    # It will be excluded from model analysis later
+    # because it was used for daily strike selection.
+    # --------------------------------------------------------
 
     # --------------------------------------------------------
     # Sort
     # --------------------------------------------------------
 
-    final_df = final_df.sort_values(
+    merged = merged.sort_values(
         [
             "timestamp",
             "strike",
@@ -393,11 +452,11 @@ def collect_expiry(
     # --------------------------------------------------------
 
     output_file = (
-        RAW_UPSTOX_DIR
+        UPSTOX_RAW_DIR
         / f"expiry_{expiry_date}.parquet"
     )
 
-    final_df.to_parquet(
+    merged.to_parquet(
         output_file,
         index=False,
     )
@@ -407,102 +466,102 @@ def collect_expiry(
     # --------------------------------------------------------
 
     print()
-    print("=" * 70)
-    print("VALIDATION")
-    print("=" * 70)
+    print("=" * 80)
+    print("EXPIRY VALIDATION")
+    print("=" * 80)
 
     print(
-        "Rows:",
-        len(final_df)
+        f"Rows: {len(merged):,}"
     )
 
     print(
-        "Contracts:",
-        final_df[
-            "instrument_key"
-        ].nunique()
+        f"Contracts: "
+        f"{merged['instrument_key'].nunique()}"
     )
 
     print(
-        "Strikes:",
-        final_df[
-            "strike"
-        ].nunique()
+        f"Strikes: "
+        f"{merged['strike'].nunique()}"
     )
 
     print(
-        "CE rows:",
-        (
-            final_df["option_type"]
-            == "CE"
-        ).sum()
+        f"CE: "
+        f"{(merged['option_type'] == 'CE').sum()}"
     )
 
     print(
-        "PE rows:",
-        (
-            final_df["option_type"]
-            == "PE"
-        ).sum()
+        f"PE: "
+        f"{(merged['option_type'] == 'PE').sum()}"
     )
 
     print(
-        "Missing NIFTY spot:",
-        final_df[
-            "nifty_spot"
-        ].isna().sum()
+        f"Trading dates: "
+        f"{merged['trade_date'].nunique()}"
     )
 
     print(
-        "Duplicate rows:",
-        final_df.duplicated(
-            subset=[
-                "instrument_key",
-                "timestamp",
-            ]
-        ).sum()
+        f"Missing NIFTY spot: "
+        f"{merged['nifty_spot'].isna().sum()}"
+    )
+
+    duplicates = merged.duplicated(
+        subset=[
+            "instrument_key",
+            "timestamp",
+        ]
+    ).sum()
+
+    print(
+        f"Duplicate contract/timestamp: "
+        f"{duplicates}"
     )
 
     print(
-        "Date range:",
-        final_df["timestamp"].min(),
-        "→",
-        final_df["timestamp"].max(),
+        f"Failed contracts: "
+        f"{len(failed_contracts)}"
     )
 
     print(
-        "Failed contracts:",
-        len(failed)
+        f"Saved: {output_file}"
     )
 
-    if failed:
+    # --------------------------------------------------------
+    # Hard validation
+    # --------------------------------------------------------
 
-        print()
-        print("FAILED CONTRACTS:")
+    if len(trading_dates) != number_of_sessions:
 
-        for item in failed:
-            print(
-                item["trading_symbol"],
-                "→",
-                item["reason"]
-            )
+        raise RuntimeError(
+            "Incorrect number of trading sessions."
+        )
+
+    if merged["nifty_spot"].isna().any():
+
+        raise RuntimeError(
+            "Missing NIFTY spot detected."
+        )
+
+    if duplicates > 0:
+
+        raise RuntimeError(
+            "Duplicate contract/timestamp detected."
+        )
 
     print()
-    print("DATASET SAVED")
- 
-
     print(
-        output_file
+        "EXPIRY COLLECTION PASSED"
     )
 
-    return final_df
+    return merged
 
+
+# ============================================================
 # TEST
+# ============================================================
 
 if __name__ == "__main__":
 
     collect_expiry(
-        TEST_EXPIRY,
-        TEST_FROM_DATE,
-        TEST_TO_DATE,
+        "2025-09-23",
+        number_of_sessions=5,
     )

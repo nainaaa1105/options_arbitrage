@@ -1,5 +1,6 @@
-import os
 from pathlib import Path
+import os
+
 from dotenv import load_dotenv
 
 
@@ -7,30 +8,43 @@ from dotenv import load_dotenv
 # PROJECT PATHS
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = BASE_DIR / "data"
 
 RAW_DIR = DATA_DIR / "raw"
-RAW_UPSTOX_DIR = RAW_DIR / "upstox"
-RAW_NSE_DIR = RAW_DIR / "nse"
+
+UPSTOX_RAW_DIR = RAW_DIR / "upstox"
 
 PROCESSED_DIR = DATA_DIR / "processed"
 
 
 # Create directories automatically
-RAW_UPSTOX_DIR.mkdir(parents=True, exist_ok=True)
-RAW_NSE_DIR.mkdir(parents=True, exist_ok=True)
-PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+UPSTOX_RAW_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
+
+PROCESSED_DIR.mkdir(
+    parents=True,
+    exist_ok=True,
+)
 
 
 
 # ENVIRONMENT
 
 
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(BASE_DIR / ".env")
 
-UPSTOX_ACCESS_TOKEN = os.getenv("UPSTOX_ACCESS_TOKEN")
+UPSTOX_ACCESS_TOKEN = os.getenv(
+    "UPSTOX_ACCESS_TOKEN"
+)
+
+if not UPSTOX_ACCESS_TOKEN:
+    raise RuntimeError(
+        "UPSTOX_ACCESS_TOKEN not found in .env"
+    )
 
 
 
@@ -46,67 +60,74 @@ NIFTY_KEY = "NSE_INDEX|Nifty 50"
 # DATA COLLECTION SETTINGS
 
 
-# Number of strikes on EACH side of ATM.
-#
-# 10 means:
-#
-# ATM - 10 strikes
-# ATM
-# ATM + 10 strikes
-#
-# Total = 21 strikes
-#
+# Number of strikes on EACH side of ATM
 STRIKES_EACH_SIDE = 10
 
+# Therefore:
+# 10 below + ATM + 10 above = 21 strikes
+EXPECTED_STRIKES = (
+    STRIKES_EACH_SIDE * 2
+) + 1
 
-# Option candle timeframe
+# CE + PE for every strike
+EXPECTED_CONTRACTS = (
+    EXPECTED_STRIKES * 2
+)
+
+
+# Option candles
 OPTION_TIMEFRAME = "5minute"
 
-# NIFTY is collected at 1 minute because
-# Upstox historical NIFTY data does not support 5minute
-# through the endpoint we are currently using.
+# NIFTY candles
 NIFTY_TIMEFRAME = "1minute"
 
 
 
-# TEST SETTINGS
+# HISTORICAL WINDOW
 
 
-TEST_EXPIRY = "2025-09-23"
-
-# Five trading-day test window
-TEST_FROM_DATE = "2025-09-18"
-TEST_TO_DATE = "2025-09-23"
+# Exactly 5 trading sessions ending on expiry
+HISTORICAL_TRADING_SESSIONS = 5
 
 
 
-# LARGE COLLECTION SETTINGS
+# API SETTINGS
 
 
-# Number of trading days before expiry to collect.
-#
-# 5 is a good starting point.
-#
-# We can later change this to 10.
-HISTORICAL_DAYS_PER_EXPIRY = 5
-
-
-# Small delay between API requests.
-#
-# Helps avoid hammering the API.
 REQUEST_DELAY_SECONDS = 0.15
 
-
-# Number of retries for temporary API errors.
 MAX_RETRIES = 3
 
 
 
-# VALIDATION
+# TEST EXPIRY
 
 
-# We expect:
-# 21 strikes × 2 option types = 42 contracts
-EXPECTED_STRIKES = (STRIKES_EACH_SIDE * 2) + 1
+TEST_EXPIRY = "2025-09-23"
+# Initial research assumption.
+# This will later be replaceable by a historical
+# risk-free-rate series.
+RISK_FREE_RATE = 0.06
 
-EXPECTED_CONTRACTS = EXPECTED_STRIKES * 2
+# Expiry is treated as 15:30 IST on the expiry date.
+EXPIRY_HOUR = 15
+EXPIRY_MINUTE = 30
+
+# IV solver bounds.
+IV_MIN = 1e-6
+IV_MAX = 5.0
+
+# Numerical tolerance for IV solver.
+IV_SOLVER_XTOL = 1e-8
+
+# Minimum option price considered usable for IV.
+MIN_OPTION_PRICE = 1e-6
+
+# Maximum reasonable IV used for the first research dataset.
+# 500% annualized volatility is deliberately generous.
+MAX_REASONABLE_IV = 5.0
+
+# Output files
+FEATURE_DATASET_FILE = (
+    PROCESSED_DIR / "options_features.parquet"
+)

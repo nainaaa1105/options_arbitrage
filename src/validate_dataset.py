@@ -1,83 +1,83 @@
-import sys
 from pathlib import Path
 
 import pandas as pd
 
 
-SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
+# ============================================================
+# PATHS
+# ============================================================
 
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+RAW_UPSTOX_DIR = (
+    BASE_DIR
+    / "data"
+    / "raw"
+    / "upstox"
+)
 
 
-from config import RAW_UPSTOX_DIR
+# ============================================================
+# VALIDATE ALL EXPIRY FILES
+# ============================================================
 
-
-def validate_dataset(file_path):
+def validate_file(file):
 
     print()
-    print("FILE:", file_path.name)
+    print("=" * 70)
+    print(f"VALIDATING: {file.name}")
+    print("=" * 70)
 
-    df = pd.read_parquet(file_path)
+    df = pd.read_parquet(file)
 
-    print("Rows:", len(df))
+    issues = []
 
-    print(
-        "Contracts:",
-        df["instrument_key"].nunique()
-    )
+    # --------------------------------------------------------
+    # Basic checks
+    # --------------------------------------------------------
 
-    print(
-        "Strikes:",
-        df["strike"].nunique()
-    )
+    if df.empty:
+        issues.append("Dataset is empty")
 
-    print(
-        "CE:",
-        (df["option_type"] == "CE").sum()
-    )
+    required_columns = [
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "open_interest",
+        "instrument_key",
+        "trading_symbol",
+        "expiry",
+        "strike",
+        "option_type",
+        "lot_size",
+        "nifty_spot",
+        "trade_date",
+    ]
 
-    print(
-        "PE:",
-        (df["option_type"] == "PE").sum()
-    )
+    missing_columns = [
+        col
+        for col in required_columns
+        if col not in df.columns
+    ]
 
-    print(
-        "Trading dates:",
-        df["timestamp"].dt.date.nunique()
-    )
+    if missing_columns:
+        issues.append(
+            f"Missing columns: {missing_columns}"
+        )
 
-    print(
-        "Date range:",
-        df["timestamp"].min(),
-        "→",
-        df["timestamp"].max()
-    )
+    if issues:
+        print("REVIEW")
+        for issue in issues:
+            print(f"  - {issue}")
+        return False
 
-    # Missing values
-    missing = df.isna().sum()
+    # --------------------------------------------------------
+    # Duplicate check
+    # --------------------------------------------------------
 
-    total_missing = int(
-        missing.sum()
-    )
-
-    print(
-        "Total missing values:",
-        total_missing
-    )
-
-    if total_missing > 0:
-
-        for column, count in missing.items():
-
-            if count > 0:
-
-                print(
-                    f"   {column}: {count}"
-                )
-
-    # Duplicate contract/timestamp
     duplicates = df.duplicated(
         subset=[
             "instrument_key",
@@ -85,91 +85,182 @@ def validate_dataset(file_path):
         ]
     ).sum()
 
-    print(
-        "Duplicate contract/timestamp rows:",
-        duplicates
+    if duplicates > 0:
+        issues.append(
+            f"Duplicate contract/timestamp rows: "
+            f"{duplicates}"
+        )
+
+    # --------------------------------------------------------
+    # Missing NIFTY
+    # --------------------------------------------------------
+
+    missing_nifty = df[
+        "nifty_spot"
+    ].isna().sum()
+
+    if missing_nifty > 0:
+        issues.append(
+            f"Missing NIFTY spot rows: "
+            f"{missing_nifty}"
+        )
+
+    # --------------------------------------------------------
+    # Missing values
+    # --------------------------------------------------------
+
+    missing_values = (
+        df[required_columns]
+        .isna()
+        .sum()
+        .sum()
     )
 
+    if missing_values > 0:
+        issues.append(
+            f"Missing values in required columns: "
+            f"{missing_values}"
+        )
+
+    # --------------------------------------------------------
     # Negative prices
-    negative = (
+    # --------------------------------------------------------
+
+    negative_prices = (
         df["close"] < 0
     ).sum()
 
-    print(
-        "Negative close prices:",
-        negative
-    )
-
-    # Zero prices
-    zero = (
-        df["close"] == 0
-    ).sum()
-
-    print(
-        "Zero close prices:",
-        zero
-    )
-
-    # NIFTY alignment
-    missing_spot = (
-        df["nifty_spot"].isna()
-    ).sum()
-
-    print(
-        "Missing NIFTY spot:",
-        missing_spot
-    )
-
-    # Contract candle counts
-    counts = (
-        df.groupby(
-            "instrument_key"
-        )["timestamp"]
-        .count()
-    )
-
-    print(
-        "Min candles/contract:",
-        counts.min()
-    )
-
-    print(
-        "Max candles/contract:",
-        counts.max()
-    )
-
-    print(
-        "Average candles/contract:",
-        round(
-            counts.mean(),
-            2
+    if negative_prices > 0:
+        issues.append(
+            f"Negative option prices: "
+            f"{negative_prices}"
         )
+
+    # --------------------------------------------------------
+    # Option types
+    # --------------------------------------------------------
+
+    option_types = set(
+        df["option_type"].dropna().unique()
     )
 
-    # Status
-    passed = (
-        total_missing == 0
-        and duplicates == 0
-        and negative == 0
-        and missing_spot == 0
+    invalid_types = option_types - {
+        "CE",
+        "PE",
+    }
+
+    if invalid_types:
+        issues.append(
+            f"Invalid option types: "
+            f"{invalid_types}"
+        )
+
+    # --------------------------------------------------------
+    # Trading sessions
+    # --------------------------------------------------------
+
+    trading_sessions = (
+        df["trade_date"]
+        .nunique()
     )
 
-    if passed:
+    if trading_sessions != 5:
+        issues.append(
+            f"Expected 5 trading sessions, "
+            f"found {trading_sessions}"
+        )
+
+    # --------------------------------------------------------
+    # Date range
+    # --------------------------------------------------------
+
+    min_date = df["trade_date"].min()
+    max_date = df["trade_date"].max()
+
+    # --------------------------------------------------------
+    # Summary
+    # --------------------------------------------------------
+
+    print(
+        f"Rows: {len(df):,}"
+    )
+
+    print(
+        f"Contracts: "
+        f"{df['instrument_key'].nunique()}"
+    )
+
+    print(
+        f"Strikes: "
+        f"{df['strike'].nunique()}"
+    )
+
+    print(
+        f"CE rows: "
+        f"{(df['option_type'] == 'CE').sum():,}"
+    )
+
+    print(
+        f"PE rows: "
+        f"{(df['option_type'] == 'PE').sum():,}"
+    )
+
+    print(
+        f"Trading sessions: "
+        f"{trading_sessions}"
+    )
+
+    print(
+        f"Date range: "
+        f"{min_date} → {max_date}"
+    )
+
+    print(
+        f"Missing NIFTY: "
+        f"{missing_nifty}"
+    )
+
+    print(
+        f"Duplicate rows: "
+        f"{duplicates}"
+    )
+
+    print(
+        f"Negative prices: "
+        f"{negative_prices}"
+    )
+
+    # --------------------------------------------------------
+    # Result
+    # --------------------------------------------------------
+
+    if issues:
 
         print()
-        print("STATUS: ✅ PASS")
+        print("REVIEW")
 
-    else:
+        for issue in issues:
+            print(
+                f"  - {issue}"
+            )
 
-        print()
-        print("STATUS: ⚠️ REVIEW REQUIRED")
+        return False
 
-    return passed
+    print()
+    print("PASS")
+
+    return True
 
 
-def validate_all():
+# ============================================================
+# MAIN
+# ============================================================
 
-    print("VALIDATE ALL EXPIRY DATASETS")
+def main():
+
+    print("=" * 70)
+    print("DATASET VALIDATION")
+    print("=" * 70)
 
     files = sorted(
         RAW_UPSTOX_DIR.glob(
@@ -179,86 +270,75 @@ def validate_all():
 
     if not files:
 
-        print(
-            "No expiry parquet files found."
+        raise RuntimeError(
+            "No expiry_*.parquet files found."
         )
 
-        return
-
     print(
-        "Files found:",
-        len(files)
+        f"Files found: {len(files)}"
     )
+
+    passed = 0
+    review = 0
 
     results = []
 
-    for file_path in files:
+    for file in files:
 
-        try:
+        success = validate_file(
+            file
+        )
 
-            passed = validate_dataset(
-                file_path
+        if success:
+
+            passed += 1
+            status = "PASS"
+
+        else:
+
+            review += 1
+            status = "REVIEW"
+
+        results.append(
+            (
+                file.name,
+                status,
             )
+        )
 
-            results.append(
-                {
-                    "file": file_path.name,
-                    "status":
-                        "PASS"
-                        if passed
-                        else "REVIEW",
-                }
-            )
-
-        except Exception as e:
-
-            print(
-                "ERROR:",
-                e
-            )
-
-            results.append(
-                {
-                    "file": file_path.name,
-                    "status": "ERROR",
-                }
-            )
+    # --------------------------------------------------------
+    # Final summary
+    # --------------------------------------------------------
 
     print()
     print("=" * 70)
     print("FINAL SUMMARY")
     print("=" * 70)
 
-    summary = pd.DataFrame(
-        results
+    print(
+        f"{'file':35} status"
     )
 
-    print(
-        summary.to_string(
-            index=False
+    for filename, status in results:
+
+        print(
+            f"{filename:35} {status}"
         )
+
+    print()
+    print(
+        f"Passed: {passed}"
+    )
+
+    print(
+        f"Review: {review}"
     )
 
     print()
     print(
-        "Passed:",
-        (
-            summary["status"]
-            == "PASS"
-        ).sum()
+        "VALIDATION COMPLETE"
     )
 
-    print(
-        "Review:",
-        (
-            summary["status"]
-            != "PASS"
-        ).sum()
-    )
-
-    print()
-    print("VALIDATION COMPLETE")
 
 if __name__ == "__main__":
-
-    validate_all()
+    main()

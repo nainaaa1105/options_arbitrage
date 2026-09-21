@@ -1,23 +1,15 @@
-import sys
-from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
 
-
-# Allow imports from src
-SRC_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SRC_DIR.parent
-
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
-
-
 from config import (
-    TEST_EXPIRY,
-    TEST_FROM_DATE,
-    TEST_TO_DATE,
     STRIKES_EACH_SIDE,
+)
+
+from strike_selector import (
+    get_atm_strike,
+    select_strikes,
+    filter_contracts_by_strikes,
 )
 
 from upstox_api import (
@@ -25,33 +17,23 @@ from upstox_api import (
     get_nifty_candles,
 )
 
-from strike_selector import (
-    get_atm_strike,
-    select_strikes,
-)
 
 
-
-# HELPERS
+# NIFTY DATA
 
 
 def get_nifty_dataframe(date):
     """
-    Convert NIFTY candles into a DataFrame.
+    Download NIFTY 1-minute candles for one date.
     """
 
-    candles = get_nifty_candles(date)
+    data = get_nifty_candles(date)
 
-    if not candles:
-        return pd.DataFrame(
-            columns=[
-                "timestamp",
-                "nifty_spot",
-            ]
-        )
+    if not data:
+        return pd.DataFrame()
 
     df = pd.DataFrame(
-        candles,
+        data,
         columns=[
             "timestamp",
             "open",
@@ -63,234 +45,279 @@ def get_nifty_dataframe(date):
         ],
     )
 
+    if df.empty:
+        return df
+
     df["timestamp"] = pd.to_datetime(
         df["timestamp"]
     )
 
-    df["nifty_spot"] = pd.to_numeric(
-        df["close"],
-        errors="coerce",
-    )
+    # API returns reverse chronological order.
+    df = df.sort_values(
+        "timestamp"
+    ).reset_index(drop=True)
 
-    return df[
-        ["timestamp", "nifty_spot"]
-    ]
+    return df
 
 
-def get_trading_dates(
-    from_date,
-    to_date,
+
+# FIND EXACT TRADING SESSIONS
+
+
+def get_previous_trading_sessions(
+    expiry_date,
+    number_of_sessions,
 ):
     """
-    Generate calendar dates.
+    Find exactly N trading sessions ending on expiry date.
 
-    We later keep only dates for which
-    NIFTY actually returns candles.
+    We move backwards one calendar day at a time.
+    A date is considered a trading session only if
+    NIFTY historical candles are returned.
     """
 
-    start = datetime.strptime(
-        from_date,
-        "%Y-%m-%d"
-    )
+    expiry = datetime.strptime(
+        expiry_date,
+        "%Y-%m-%d",
+    ).date()
 
-    end = datetime.strptime(
-        to_date,
-        "%Y-%m-%d"
-    )
+    sessions = []
 
-    dates = []
+    current_date = expiry
 
-    current = start
+    # Safety limit
+    max_days_to_check = (
+        number_of_sessions * 5
+    ) + 10
 
-    while current <= end:
+    days_checked = 0
 
-        dates.append(
-            current.strftime("%Y-%m-%d")
+    while len(sessions) < number_of_sessions:
+
+        date_str = current_date.isoformat()
+
+        print(
+            f"Checking NIFTY: {date_str}"
         )
 
-        current += timedelta(days=1)
+        nifty_df = get_nifty_dataframe(
+            date_str
+        )
 
-    return dates
+        if not nifty_df.empty:
+
+            sessions.append(
+                {
+                    "date": date_str,
+                    "nifty_df": nifty_df,
+                }
+            )
+
+            print(
+                f"  Trading session found: "
+                f"{date_str}"
+            )
+
+        current_date -= timedelta(days=1)
+
+        days_checked += 1
+
+        if days_checked > max_days_to_check:
+
+            raise RuntimeError(
+                f"Could not find exactly "
+                f"{number_of_sessions} trading "
+                f"sessions ending at "
+                f"{expiry_date}"
+            )
+
+    # We searched backwards.
+    # Reverse into chronological order.
+    sessions.reverse()
+
+    return sessions
 
 
 
-# DAILY STRIKE PREPARATION
+# PREPARE ONE EXPIRY
 
 
 def prepare_expiry(
     expiry_date,
-    from_date,
-    to_date,
+    number_of_sessions=5,
 ):
-    print("=" * 70)
-    print("PREPARE EXPIRY")
-    print("=" * 70)
+    """
+    Prepare all data required for one expiry.
 
-    print("Expiry:", expiry_date)
-    print("From:", from_date)
-    print("To:", to_date)
+    Steps:
 
-    
-    # Get contracts
-    
+    1. Download all expired contracts.
+    2. Find exactly N trading sessions.
+    3. Calculate daily ATM from 09:15 NIFTY close.
+    4. Select ±10 strikes around daily ATM.
+    5. Take union of all required strikes.
+    6. Select CE + PE contracts for union.
+    """
 
     print()
-    print("Downloading expired contracts...")
+    print("=" * 80)
+    print(
+        f"PREPARING EXPIRY: {expiry_date}"
+    )
+    print("=" * 80)
+
+    # --------------------------------------------------------
+    # 1. Get contracts
+    # --------------------------------------------------------
 
     contracts = get_expired_contracts(
         expiry_date
     )
 
-    print(
-        "Total contracts:",
-        len(contracts)
-    )
-
     if not contracts:
+
         raise RuntimeError(
-            "No contracts returned."
+            f"No expired contracts found "
+            f"for {expiry_date}"
         )
 
-    # Only CE / PE
-    option_contracts = [
-        c for c in contracts
-        if c.get("instrument_type")
-        in ["CE", "PE"]
-    ]
+    print(
+        f"Total available contracts: "
+        f"{len(contracts)}"
+    )
 
     available_strikes = sorted(
         set(
             float(c["strike_price"])
-            for c in option_contracts
+            for c in contracts
+            if c.get("instrument_type")
+            in ["CE", "PE"]
         )
     )
 
     print(
-        "Available strikes:",
-        len(available_strikes)
+        f"Available strikes: "
+        f"{len(available_strikes)}"
     )
 
-    print(
-        "Strike range:",
-        min(available_strikes),
-        "to",
-        max(available_strikes)
+    # --------------------------------------------------------
+    # 2. Find exactly 5 sessions
+    # --------------------------------------------------------
+
+    sessions = get_previous_trading_sessions(
+        expiry_date,
+        number_of_sessions,
     )
 
-    
-    # Calculate daily ATM
-    
+    trading_dates = [
+        session["date"]
+        for session in sessions
+    ]
 
     print()
-    print("Calculating daily ATM...")
-
-    trading_dates = get_trading_dates(
-        from_date,
-        to_date,
+    print(
+        "EXACT TRADING SESSIONS:"
     )
 
-    daily_info = []
-
-    all_required_strikes = set()
-
     for date in trading_dates:
+        print(
+            f"  {date}"
+        )
 
-        nifty_df = get_nifty_dataframe(date)
+    if len(trading_dates) != number_of_sessions:
+
+        raise RuntimeError(
+            "Trading-session count mismatch."
+        )
+
+    # --------------------------------------------------------
+    # 3. Daily ATM selection
+    # --------------------------------------------------------
+
+    daily_selection = []
+
+    union_strikes = set()
+
+    for session in sessions:
+
+        date = session["date"]
+
+        nifty_df = session["nifty_df"]
 
         if nifty_df.empty:
             continue
 
-        # First available NIFTY observation.
-        #
-        # We use the 09:15 candle close.
+        # First candle = 09:15
         reference_spot = float(
-            nifty_df.iloc[0]["nifty_spot"]
+            nifty_df.iloc[0]["close"]
         )
 
-        atm = get_atm_strike(
+        atm_strike = get_atm_strike(
             reference_spot,
             available_strikes,
         )
 
-        selected = select_strikes(
-            atm,
+        selected_strikes = select_strikes(
+            atm_strike,
             available_strikes,
             STRIKES_EACH_SIDE,
         )
 
-        all_required_strikes.update(
-            selected
+        union_strikes.update(
+            selected_strikes
         )
 
-        daily_info.append(
+        daily_selection.append(
             {
                 "date": date,
                 "nifty_spot": reference_spot,
-                "atm_strike": atm,
-                "selected_strikes": selected,
+                "atm_strike": atm_strike,
+                "selected_strikes":
+                    selected_strikes,
             }
         )
 
         print(
             f"{date} | "
             f"NIFTY={reference_spot:.2f} | "
-            f"ATM={atm:.0f} | "
-            f"Strikes={len(selected)}"
+            f"ATM={atm_strike:.0f} | "
+            f"Strikes={len(selected_strikes)} | "
+            f"Range="
+            f"{min(selected_strikes):.0f}"
+            f" → "
+            f"{max(selected_strikes):.0f}"
         )
 
-    if not daily_info:
-        raise RuntimeError(
-            "No trading days found."
-        )
-
-    
-    # Summary
-    
+    # --------------------------------------------------------
+    # 4. Union strikes
+    # --------------------------------------------------------
 
     union_strikes = sorted(
-        all_required_strikes
+        union_strikes
     )
 
     print()
-    print("=" * 70)
-    print("PREPARATION SUMMARY")
-    print("=" * 70)
-
     print(
-        "Trading days:",
-        len(daily_info)
+        f"UNION STRIKES: "
+        f"{len(union_strikes)}"
     )
 
     print(
-        "Daily strike target:",
-        (STRIKES_EACH_SIDE * 2) + 1
+        f"UNION RANGE: "
+        f"{min(union_strikes):.0f}"
+        f" → "
+        f"{max(union_strikes):.0f}"
     )
 
-    print(
-        "Unique strikes in UNION:",
-        len(union_strikes)
-    )
+    # --------------------------------------------------------
+    # 5. Required contracts
+    # --------------------------------------------------------
 
-    print(
-        "Union strike range:",
-        min(union_strikes),
-        "to",
-        max(union_strikes),
-    )
-
-    
-    # Find required contracts
-    
-
-    required_contracts = [
-        c for c in option_contracts
-        if float(c["strike_price"])
-        in set(union_strikes)
-    ]
-
-    print(
-        "Required contracts:",
-        len(required_contracts)
+    required_contracts = (
+        filter_contracts_by_strikes(
+            contracts,
+            union_strikes,
+        )
     )
 
     ce_count = sum(
@@ -305,20 +332,42 @@ def prepare_expiry(
         if c.get("instrument_type") == "PE"
     )
 
+    print()
     print(
-        "CE:",
-        ce_count,
-        "| PE:",
-        pe_count,
+        f"REQUIRED CONTRACTS: "
+        f"{len(required_contracts)}"
     )
 
+    print(
+        f"CE: {ce_count}"
+    )
+
+    print(
+        f"PE: {pe_count}"
+    )
+
+    print("=" * 80)
+
     return {
-        "expiry": expiry_date,
-        "from_date": from_date,
-        "to_date": to_date,
-        "daily_info": daily_info,
-        "union_strikes": union_strikes,
-        "required_contracts": required_contracts,
+        "expiry_date": expiry_date,
+
+        "trading_dates":
+            trading_dates,
+
+        "daily_selection":
+            daily_selection,
+
+        "union_strikes":
+            union_strikes,
+
+        "contracts":
+            required_contracts,
+
+        "nifty_data": {
+            session["date"]:
+                session["nifty_df"]
+            for session in sessions
+        },
     }
 
 
@@ -329,10 +378,31 @@ def prepare_expiry(
 if __name__ == "__main__":
 
     result = prepare_expiry(
-        TEST_EXPIRY,
-        TEST_FROM_DATE,
-        TEST_TO_DATE,
+        "2025-09-23",
+        number_of_sessions=5,
     )
 
     print()
+    print("=" * 80)
     print("PREPARATION COMPLETE")
+    print("=" * 80)
+
+    print(
+        "Number of sessions:",
+        len(result["trading_dates"]),
+    )
+
+    print(
+        "Trading dates:",
+        result["trading_dates"],
+    )
+
+    print(
+        "Union strikes:",
+        len(result["union_strikes"]),
+    )
+
+    print(
+        "Required contracts:",
+        len(result["contracts"]),
+    )
