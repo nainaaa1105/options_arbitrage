@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from convergence import build_future_convergence_target
 
 
 # ============================================================
@@ -81,174 +82,13 @@ df["current_absolute_deviation"] = (
 # ============================================================
 
 def create_future_target(data, horizon_minutes):
-
-    print(
-        f"\nCreating {horizon_minutes}-minute future target..."
+    print(f"\nCreating {horizon_minutes}-minute endpoint target...")
+    return build_future_convergence_target(
+        data, horizon_minutes,
+        min_current_deviation=MIN_CURRENT_DEVIATION,
+        tolerance_minutes=FUTURE_TOLERANCE_MINUTES,
+        reduction_threshold=CONVERGENCE_THRESHOLD,
     )
-
-    # --------------------------------------------------------
-    # LEFT SIDE
-    # --------------------------------------------------------
-
-    left = data[
-        [
-            "instrument_key",
-            "timestamp",
-            "expiry",
-            "signal_eligible",
-            "current_absolute_deviation",
-        ]
-    ].copy()
-
-    left["target_time"] = (
-        left["timestamp"]
-        + pd.Timedelta(minutes=horizon_minutes)
-    )
-
-    # --------------------------------------------------------
-    # RIGHT SIDE
-    # --------------------------------------------------------
-
-    right = data[
-        [
-            "instrument_key",
-            "timestamp",
-            "expiry",
-            "current_absolute_deviation",
-        ]
-    ].copy()
-
-    right = right.rename(
-        columns={
-            "timestamp": "future_timestamp",
-            "current_absolute_deviation":
-                "future_absolute_deviation",
-        }
-    )
-
-    # --------------------------------------------------------
-    # IMPORTANT:
-    #
-    # merge_asof requires the merge keys to be sorted.
-    # Sort primarily by the TIME KEY.
-    # --------------------------------------------------------
-
-    left = left.sort_values(
-        ["target_time", "instrument_key"]
-    ).reset_index(drop=True)
-
-    right = right.sort_values(
-        ["future_timestamp", "instrument_key"]
-    ).reset_index(drop=True)
-
-    # --------------------------------------------------------
-    # AS-OF MERGE
-    # --------------------------------------------------------
-
-    merged = pd.merge_asof(
-        left,
-        right,
-        left_on="target_time",
-        right_on="future_timestamp",
-        by="instrument_key",
-        direction="forward",
-        tolerance=pd.Timedelta(
-            minutes=FUTURE_TOLERANCE_MINUTES
-        ),
-    )
-
-    # --------------------------------------------------------
-    # SAME EXPIRY
-    # --------------------------------------------------------
-
-    merged["future_same_expiry"] = (
-        merged["expiry_x"]
-        == merged["expiry_y"]
-    )
-
-    # --------------------------------------------------------
-    # ACTUAL FUTURE DEVIATION
-    # --------------------------------------------------------
-
-    merged[
-        f"future_deviation_{horizon_minutes}m"
-    ] = merged["future_absolute_deviation"]
-
-    # --------------------------------------------------------
-    # LABEL VALIDITY
-    # --------------------------------------------------------
-
-    merged[
-        f"label_valid_{horizon_minutes}m"
-    ] = (
-        merged["signal_eligible"].fillna(False)
-        & merged["current_absolute_deviation"].notna()
-        & (
-            merged["current_absolute_deviation"]
-            >= MIN_CURRENT_DEVIATION
-        )
-        & merged["future_absolute_deviation"].notna()
-        & merged["future_same_expiry"]
-    )
-
-    # --------------------------------------------------------
-    # DEVIATION REDUCTION
-    # --------------------------------------------------------
-
-    current = merged[
-        "current_absolute_deviation"
-    ]
-
-    future = merged[
-        "future_absolute_deviation"
-    ]
-
-    reduction = (
-        (current - future)
-        / current
-    )
-
-    reduction = reduction.replace(
-        [np.inf, -np.inf],
-        np.nan,
-    )
-
-    merged[
-        f"deviation_reduction_{horizon_minutes}m"
-    ] = reduction
-
-    # --------------------------------------------------------
-    # CONVERGENCE LABEL
-    # --------------------------------------------------------
-
-    merged[
-        f"converged_{horizon_minutes}m"
-    ] = (
-        merged[
-            f"label_valid_{horizon_minutes}m"
-        ]
-        & (
-            merged[
-                f"deviation_reduction_{horizon_minutes}m"
-            ]
-            >= CONVERGENCE_THRESHOLD
-        )
-    )
-
-    # --------------------------------------------------------
-    # RETURN ONLY LABEL COLUMNS
-    # --------------------------------------------------------
-
-    return merged[
-        [
-            "instrument_key",
-            "timestamp",
-            f"future_deviation_{horizon_minutes}m",
-            f"deviation_reduction_{horizon_minutes}m",
-            f"label_valid_{horizon_minutes}m",
-            f"converged_{horizon_minutes}m",
-        ]
-    ]
 
 
 # ============================================================

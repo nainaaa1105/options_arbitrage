@@ -1,0 +1,4 @@
+period,slots_after_burn_in,slots_with_candidates,mean_candidates_per_slot,candidates_with_probability,candidates,ml_slots_tau50,ml_slots_tau60,ml_slots_tau70
+development,846,712,3.4115168539325844,2429,2429,511,364,193
+validation,324,259,2.7451737451737452,711,711,158,98,41
+test,168,142,3.2535211267605635,462,462,91,63,28

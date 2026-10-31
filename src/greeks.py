@@ -66,9 +66,8 @@ def calculate_greeks(
     # --------------------------------------------------------
     # Vega
     #
-    # This is price change for a 1.00 change in volatility.
-    # Divide by 100 if you want per 1 volatility percentage
-    # point.
+    # Reported per one volatility percentage point: the raw derivative
+    # with respect to decimal volatility is divided by 100 below.
     # --------------------------------------------------------
 
     vega = (

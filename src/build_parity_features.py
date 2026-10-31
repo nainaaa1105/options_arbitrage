@@ -1,6 +1,7 @@
 from pathlib import Path
 import pandas as pd
 import numpy as np
+from parity import calculate_parity_residual
 
 
 # ============================================================
@@ -150,9 +151,9 @@ parity["observed_call_put_difference"] = (
 # PARITY RESIDUAL
 # ============================================================
 
-parity["parity_residual"] = (
-    parity["observed_call_put_difference"]
-    - parity["theoretical_call_put_difference"]
+parity["parity_residual"] = calculate_parity_residual(
+    parity["call_price"], parity["put_price"], parity["nifty_spot"],
+    parity["strike"], parity["time_to_expiry"], parity["risk_free_rate"],
 )
 
 

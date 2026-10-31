@@ -74,9 +74,16 @@ def add_time_to_expiry(df):
     # Calculate remaining time
     # --------------------------------------------------------
 
+    observation_time = df["timestamp"]
+    if "feature_available_at" in df:
+        observation_time = pd.to_datetime(df["feature_available_at"])
+        if observation_time.dt.tz is None:
+            observation_time = observation_time.dt.tz_localize("Asia/Kolkata")
+        else:
+            observation_time = observation_time.dt.tz_convert("Asia/Kolkata")
     remaining_seconds = (
         df["expiry_timestamp"]
-        - df["timestamp"]
+        - observation_time
     ).dt.total_seconds()
 
     # --------------------------------------------------------

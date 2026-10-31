@@ -128,7 +128,7 @@ def process_row(row):
     )
 
 
-def main():
+def main(vectorized=False):
 
     input_file = (
         FEATURE_DATASET_FILE.parent
@@ -218,10 +218,11 @@ def main():
     print("Calculating IV, theoretical price and Greeks...")
     print("This may take some time for 519k rows.")
 
-    features = df.apply(
-        process_row,
-        axis=1,
-    )
+    if vectorized:
+        from vector_pricing import batch_pricing_features
+        features = batch_pricing_features(df)
+    else:
+        features = df.apply(process_row, axis=1)
 
     df = pd.concat(
         [df, features],
@@ -398,4 +399,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vectorized", action="store_true", help="Use equivalent batched IV and Greek calculations")
+    main(vectorized=parser.parse_args().vectorized)

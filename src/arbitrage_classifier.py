@@ -1,127 +1,88 @@
-"""
-arbitrage_classifier.py
-=======================
-High-Accuracy (93%+) Production Inference Classifier for Options Arbitrage Convergence.
+"""Inference wrapper for the validation-selected 30-minute model."""
 
-Operational Design:
--------------------
-- Uses Optuna-tuned ensemble of XGBoost + LightGBM.
-- Employs calibrated selective prediction with a default confidence margin of +/- 0.23:
-    * Predict 1 (Arbitrage Convergence Trade) if P(converged) >= 0.73
-    * Predict 0 (No Convergence / Do Not Trade) if P(converged) <= 0.27
-    * Abstain (-1) if in borderline noise band [0.27, 0.73]
-- Empirical Test Accuracy on Active Signals: >= 93.45%
-"""
-
+import json
 from pathlib import Path
+
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from research_targets import session_horizon_eligible
 
 
 class HighAccuracyArbitrageClassifier:
-    """
-    Production-ready high-accuracy arbitrage classifier guaranteeing >= 93%+ accuracy.
-    """
+    """Load the selected model; no fixed accuracy or profitability is promised."""
 
-    def __init__(self, models_dir=None, confidence_margin=0.23):
-        if models_dir is None:
-            models_dir = Path(__file__).resolve().parent.parent / "data" / "processed" / "models"
+    def __init__(self, models_dir=None, confidence_margin=None):
+        self.models_dir = Path(models_dir) if models_dir else (
+            Path(__file__).resolve().parent.parent / "data" / "processed" / "models"
+        )
+        self.feature_columns = joblib.load(
+            self.models_dir / "best_model_feature_columns.joblib"
+        )
+        selected = self.models_dir / "best_model.joblib"
+        self.legacy = not selected.exists()
+        self.feature_schema_version = 1
+        if self.legacy:
+            self.imputer_medians = joblib.load(
+                self.models_dir / "best_model_imputer_medians.joblib"
+            )
+            self.xgb_model = joblib.load(self.models_dir / "best_model_xgboost.joblib")
+            self.lgb_model = joblib.load(self.models_dir / "best_model_lightgbm.joblib")
+            threshold = 0.73
         else:
-            models_dir = Path(models_dir)
-            
-        self.models_dir = models_dir
-        self.confidence_margin = confidence_margin
-        self.lo_threshold = 0.50 - confidence_margin  # 0.27
-        self.hi_threshold = 0.50 + confidence_margin  # 0.73
-        
-        # Load artifacts
-        self.feature_columns = joblib.load(models_dir / "best_model_feature_columns.joblib")
-        self.imputer_medians = joblib.load(models_dir / "best_model_imputer_medians.joblib")
-        self.xgb_model       = joblib.load(models_dir / "best_model_xgboost.joblib")
-        self.lgb_model       = joblib.load(models_dir / "best_model_lightgbm.joblib")
+            self.model = joblib.load(selected)
+            with open(self.models_dir / "best_model_config.json", encoding="utf-8") as stream:
+                config = json.load(stream)
+                threshold = float(config["threshold"])
+                self.feature_schema_version = config.get("feature_schema_version", 1)
+        if confidence_margin is not None:
+            threshold = 0.5 + float(confidence_margin)
+        self.threshold = float(threshold)
+        self.confidence_margin = self.threshold - 0.5
 
     def predict_proba(self, X_df):
-        """Returns calibrated probability of 30-minute convergence."""
-        X_mat = X_df[self.feature_columns].fillna(self.imputer_medians).values
-        p_xgb = self.xgb_model.predict_proba(X_mat)[:, 1]
-        p_lgb = self.lgb_model.predict_proba(X_mat)[:, 1]
-        return 0.55 * p_xgb + 0.45 * p_lgb
+        supplied_version = X_df.attrs.get("feature_schema_version")
+        if supplied_version is not None and supplied_version != self.feature_schema_version:
+            raise ValueError("Feature schema differs from the fitted model; rebuild features using the model's schema version")
+        X = X_df[self.feature_columns]
+        if not self.legacy:
+            return self.model.predict_proba(X)[:, 1]
+        matrix = X.fillna(self.imputer_medians).values
+        return (
+            0.55 * self.xgb_model.predict_proba(matrix)[:, 1]
+            + 0.45 * self.lgb_model.predict_proba(matrix)[:, 1]
+        )
 
     def predict(self, X_df, return_abstain=False):
-        """
-        Generates high-accuracy predictions (>= 93% accuracy on active signals).
-        
-        Parameters:
-        -----------
-        return_abstain: bool
-            If True, returns 1 (Convergence), 0 (No Convergence), -1 (Abstained).
-            If False, returns predictions for active instances and boolean active mask.
-        """
-        probs = self.predict_proba(X_df)
-        
+        probabilities = self.predict_proba(X_df)
+        eligible = np.ones(len(X_df), dtype=bool)
+        if "timestamp" in X_df:
+            eligible = session_horizon_eligible(X_df["timestamp"], horizon_minutes=30).to_numpy()
+        active_mask = (probabilities >= self.threshold) & eligible
         if return_abstain:
-            preds = np.full(len(probs), -1, dtype=int)
-            preds[probs >= self.hi_threshold] = 1
-            preds[probs <= self.lo_threshold] = 0
-            return preds
-        else:
-            active_mask = (probs <= self.lo_threshold) | (probs >= self.hi_threshold)
-            preds_active = np.where(probs[active_mask] >= 0.50, 1, 0)
-            return preds_active, active_mask
+            # Below cutoff means no convergence trade; it is not a second signal.
+            return np.where(active_mask, 1, -1)
+        return np.ones(int(active_mask.sum()), dtype=int), active_mask
 
     def evaluate(self, X_df, y_true):
-        """Evaluates empirical accuracy and confusion matrix on active high-conviction signals."""
-        probs = self.predict_proba(X_df)
-        active_mask = (probs <= self.lo_threshold) | (probs >= self.hi_threshold)
-        
-        n_total  = len(y_true)
-        n_active = int(active_mask.sum())
-        coverage = (n_active / n_total) * 100.0
-        
-        y_active = np.array(y_true)[active_mask]
-        preds_active = np.where(probs[active_mask] >= 0.50, 1, 0)
-        
-        acc = accuracy_score(y_active, preds_active)
-        cm  = confusion_matrix(y_active, preds_active)
-        
-        pos_mask = probs >= self.hi_threshold
-        neg_mask = probs <= self.lo_threshold
-        
-        pos_acc = accuracy_score(np.array(y_true)[pos_mask], np.ones(pos_mask.sum())) if pos_mask.sum() > 0 else np.nan
-        neg_acc = accuracy_score(np.array(y_true)[neg_mask], np.zeros(neg_mask.sum())) if neg_mask.sum() > 0 else np.nan
-        
-        print("=" * 80)
-        print(f"HIGH-ACCURACY ARBITRAGE EVALUATION (Target: >= 93% Accuracy)")
-        print("=" * 80)
-        print(f"Confidence Margin:        +/- {self.confidence_margin:.2f}")
-        print(f"Decision Thresholds:      P <= {self.lo_threshold:.2f} (No Trade) | P >= {self.hi_threshold:.2f} (Trade)")
-        print(f"Total Evaluated Samples:  {n_total:,}")
-        print(f"Active Traded Signals:    {n_active:,} ({coverage:.1f}% coverage)")
-        print(f"--> EMPIRICAL SYSTEM ACCURACY: {acc * 100:.2f}% <--")
-        print(f"Long Entry Win Rate (P>=hi):   {pos_acc * 100:.2f}% ({pos_mask.sum():,} signals)")
-        print(f"No-Trade Accuracy (P<=lo):     {neg_acc * 100:.2f}% ({neg_mask.sum():,} signals)")
-        print("\nConfusion Matrix (Active Signals):")
-        print(f"  [TN={cm[0,0]:,}, FP={cm[0,1]:,}]")
-        print(f"  [FN={cm[1,0]:,}, TP={cm[1,1]:,}]")
-        print("=" * 80)
-        
-        return {
-            "accuracy": acc,
-            "coverage_pct": coverage,
-            "active_samples": n_active,
-            "long_win_rate": pos_acc,
-            "no_trade_accuracy": neg_acc
-        }
+        probabilities = self.predict_proba(X_df)
+        predictions = (probabilities >= self.threshold).astype(int)
+        accuracy = accuracy_score(y_true, predictions)
+        matrix = confusion_matrix(y_true, predictions, labels=[0, 1])
+        print(f"Threshold: {self.threshold:.4f}")
+        print(f"Overall classification accuracy: {accuracy:.4f}")
+        print(classification_report(y_true, predictions, zero_division=0))
+        print(f"Confusion matrix (TN,FP/FN,TP):\n{matrix}")
+        return {"accuracy": accuracy, "threshold": self.threshold, "confusion_matrix": matrix}
 
 
 if __name__ == "__main__":
-    from train_models import build_features, TARGET, SPLIT_DIR
-    test_raw = pd.read_parquet(SPLIT_DIR / "test.parquet")
-    processed = build_features({"test": test_raw})
-    test_df = processed["test"]
-    
-    clf = HighAccuracyArbitrageClassifier(confidence_margin=0.23)
-    clf.evaluate(test_df, test_df[TARGET])
+    from train_models import SPLIT_DIR, TARGET, build_features
 
+    test_raw = pd.read_parquet(SPLIT_DIR / "test.parquet")
+    classifier = HighAccuracyArbitrageClassifier()
+    test_df = build_features(
+        {"test": test_raw}, feature_schema_version=classifier.feature_schema_version
+    )["test"]
+    classifier.evaluate(test_df, test_df[TARGET])

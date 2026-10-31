@@ -1,59 +1,46 @@
-"""
-Options Arbitrage Strategy Backtesting Engine
-=============================================
+"""Conservative, next-bar options backtest for 5-minute OHLC data.
 
-This module performs chronological out-of-sample backtesting on generated BUY/SELL
-signals from `data/processed/trade_signals.parquet`.
-
-Key Principles:
-1. Strict Chronological Execution: No future lookahead bias in entry.
-2. Realistic Transaction Costs & Slippage: Configurable exchange fees, STT, GST,
-   brokerage, and per-leg slippage.
-3. Accurate Contract Matching: Pulls historical realized prices from `master_options.parquet`
-   at the target holding horizon.
-
-Output Artifacts:
-- `data/processed/backtest_trades.parquet`
-- `data/processed/backtest_summary.csv`
-- `data/processed/equity_curve.csv`
+The source has no bid/ask quotes or historical SPAN files.  Accordingly this
+engine applies explicit half-spread and slippage assumptions and excludes
+short-option signals unless a per-lot short margin proxy is supplied.
 """
 
 import argparse
 import logging
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger("backtest")
-
-
-# =====================================================================
-# DEFAULT CONFIGURATION
-# =====================================================================
-
+MARKET_TZ = "Asia/Kolkata"
 DEFAULT_HORIZON_MINUTES = 30
-DEFAULT_SLIPPAGE_POINTS = 0.15      # 15 paise slippage per share per leg
-DEFAULT_BROKERAGE_PER_ORDER = 20.0  # ₹20 flat brokerage per executed order
-DEFAULT_STT_RATE = 0.000625         # 0.0625% STT on option sell turnover
-DEFAULT_EXCHANGE_TXN_RATE = 0.0005  # ~0.05% Exchange turnover, SEBI charges, GST
+DEFAULT_INITIAL_CAPITAL = 250_000.0
+DEFAULT_MAX_CONCURRENT_POSITIONS = 5
+DEFAULT_CAPITAL_FRACTION = 0.95
+DEFAULT_MAX_LOTS = 1
+DEFAULT_HALF_SPREAD_POINTS = 0.15
+DEFAULT_SLIPPAGE_POINTS = 0.15
+DEFAULT_BROKERAGE_PER_ORDER = 20.0
+DEFAULT_EXCHANGE_RATE = 0.0003553  # NSE equity options premium turnover, 2026 schedule
+DEFAULT_SEBI_RATE = 0.000001       # 0.0001% on premium turnover
+DEFAULT_STAMP_DUTY_RATE = 0.00003  # 0.003%, buyer side on premium turnover
+DEFAULT_GST_RATE = 0.18
+STT_RATE_BEFORE_2026_04_01 = 0.001
+STT_RATE_FROM_2026_04_01 = 0.0015
 
 
-# =====================================================================
-# BACKTEST ENGINE
-# =====================================================================
+def _market_timestamps(series):
+    timestamps = pd.to_datetime(series, errors="coerce")
+    if timestamps.dt.tz is None:
+        return timestamps.dt.tz_localize(MARKET_TZ)
+    return timestamps.dt.tz_convert(MARKET_TZ)
+
 
 class OptionsArbitrageBacktester:
-    """
-    Chronological trade execution & P&L calculator for options arbitrage signals.
-    """
+    """Run next-bar fills with explicit costs, capital, and overlap controls."""
 
     def __init__(
         self,
@@ -63,367 +50,303 @@ class OptionsArbitrageBacktester:
         horizon_minutes: int = DEFAULT_HORIZON_MINUTES,
         slippage_points: float = DEFAULT_SLIPPAGE_POINTS,
         brokerage_per_order: float = DEFAULT_BROKERAGE_PER_ORDER,
-        stt_rate: float = DEFAULT_STT_RATE,
-        exchange_txn_rate: float = DEFAULT_EXCHANGE_TXN_RATE,
+        stt_rate: float | None = None,
+        exchange_txn_rate: float = DEFAULT_EXCHANGE_RATE,
+        *,
+        initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+        max_concurrent_positions: int = DEFAULT_MAX_CONCURRENT_POSITIONS,
+        capital_fraction: float = DEFAULT_CAPITAL_FRACTION,
+        max_lots: int = DEFAULT_MAX_LOTS,
+        half_spread_points: float = DEFAULT_HALF_SPREAD_POINTS,
+        sebi_rate: float = DEFAULT_SEBI_RATE,
+        stamp_duty_rate: float = DEFAULT_STAMP_DUTY_RATE,
+        gst_rate: float = DEFAULT_GST_RATE,
+        short_margin_per_lot: float = 0.0,
     ):
-        self.signals_file = signals_file
-        self.master_file = master_file
-        self.output_dir = output_dir
-        self.horizon_minutes = horizon_minutes
-        self.slippage_points = slippage_points
-        self.brokerage_per_order = brokerage_per_order
-        self.stt_rate = stt_rate
-        self.exchange_txn_rate = exchange_txn_rate
-
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.signals_file = Path(signals_file)
+        self.master_file = Path(master_file)
+        self.output_dir = Path(output_dir)
+        self.horizon_minutes = int(horizon_minutes)
+        self.slippage_points = float(slippage_points)
+        self.half_spread_points = float(half_spread_points)
+        self.brokerage_per_order = float(brokerage_per_order)
+        self.stt_rate_override = stt_rate
+        self.exchange_txn_rate = float(exchange_txn_rate)
+        self.sebi_rate = float(sebi_rate)
+        self.stamp_duty_rate = float(stamp_duty_rate)
+        self.gst_rate = float(gst_rate)
+        self.initial_capital = float(initial_capital)
+        self.max_concurrent_positions = int(max_concurrent_positions)
+        self.capital_fraction = float(capital_fraction)
+        self.max_lots = int(max_lots)
+        self.short_margin_per_lot = float(short_margin_per_lot)
+        if self.horizon_minutes <= 0 or self.initial_capital <= 0:
+            raise ValueError("horizon_minutes and initial_capital must be positive")
+        if not 0 < self.capital_fraction <= 1 or self.max_lots < 1:
+            raise ValueError("capital_fraction must be (0,1] and max_lots >= 1")
+        self.skipped = {}
 
     def load_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Load signals and historical market options data."""
-        if not self.signals_file.exists():
-            raise FileNotFoundError(f"Signals file not found at: {self.signals_file}")
-        if not self.master_file.exists():
-            raise FileNotFoundError(f"Master options file not found at: {self.master_file}")
+        if not self.signals_file.exists() or not self.master_file.exists():
+            raise FileNotFoundError("Signal or master price file is missing")
+        return pd.read_parquet(self.signals_file), pd.read_parquet(self.master_file)
 
-        logger.info(f"Loading trade signals from: {self.signals_file}")
-        signals_df = pd.read_parquet(self.signals_file)
+    def _stt_rate(self, timestamp):
+        if self.stt_rate_override is not None:
+            return float(self.stt_rate_override)
+        cutoff = pd.Timestamp("2026-04-01", tz=MARKET_TZ)
+        return STT_RATE_FROM_2026_04_01 if timestamp >= cutoff else STT_RATE_BEFORE_2026_04_01
 
-        logger.info(f"Loading master options price data from: {self.master_file}")
-        master_df = pd.read_parquet(self.master_file)
+    def simulate(self, signals_df: pd.DataFrame, master_df: pd.DataFrame):
+        required_signals = {"timestamp", "instrument_key", "trade_signal"}
+        required_market = {"timestamp", "instrument_key", "open", "lot_size"}
+        if required_signals.difference(signals_df.columns):
+            raise ValueError(f"Signals missing columns: {sorted(required_signals.difference(signals_df.columns))}")
+        if required_market.difference(master_df.columns):
+            raise ValueError(f"Master data missing columns: {sorted(required_market.difference(master_df.columns))}")
 
-        # Ensure uniform timezone (Asia/Kolkata)
-        signals_df["timestamp"] = pd.to_datetime(signals_df["timestamp"]).dt.tz_convert("Asia/Kolkata")
-        master_df["timestamp"] = pd.to_datetime(master_df["timestamp"]).dt.tz_convert("Asia/Kolkata")
+        signals = signals_df.copy()
+        market = master_df.copy()
+        signals["timestamp"] = _market_timestamps(signals["timestamp"])
+        market["timestamp"] = _market_timestamps(market["timestamp"])
+        market["open"] = pd.to_numeric(market["open"], errors="coerce")
+        market["lot_size"] = pd.to_numeric(market["lot_size"], errors="coerce")
+        market = market.dropna(subset=["timestamp", "instrument_key", "open", "lot_size"])
+        market = market.loc[(market.open > 0) & (market.lot_size > 0)]
+        market = market.sort_values("timestamp")
+        bars = {
+            key: part.sort_values("timestamp").reset_index(drop=True)
+            for key, part in market.groupby("instrument_key", sort=False)
+        }
+        actionable = signals.loc[signals["trade_signal"].isin(["BUY", "SELL"])].sort_values("timestamp")
+        active = []
+        records = []
+        self.skipped = {}
 
-        return signals_df, master_df
+        def skip(reason):
+            self.skipped[reason] = self.skipped.get(reason, 0) + 1
 
-    def run_backtest(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Execute chronological backtest over all BUY and SELL signals.
-        """
-        signals_df, master_df = self.load_data()
+        for _, signal in actionable.iterrows():
+            key = signal["instrument_key"]
+            contract_bars = bars.get(key)
+            if contract_bars is None:
+                skip("contract_not_in_market_data")
+                continue
+            times = contract_bars["timestamp"].dt.as_unit("ns").array.asi8
+            entry_ns = signal["timestamp"].value
+            entry_idx = int(np.searchsorted(times, entry_ns, side="right"))
+            if entry_idx >= len(contract_bars):
+                skip("no_next_bar_entry")
+                continue
+            entry_bar = contract_bars.iloc[entry_idx]
+            entry_time = entry_bar["timestamp"]
+            exit_target = entry_time + pd.Timedelta(minutes=self.horizon_minutes)
+            exit_idx = int(np.searchsorted(times, exit_target.value, side="left"))
+            if exit_idx >= len(contract_bars):
+                skip("missing_exit_bar")
+                continue
+            exit_bar = contract_bars.iloc[exit_idx]
+            exit_time = exit_bar["timestamp"]
+            raw_entry = float(entry_bar["open"])
+            raw_exit = float(exit_bar["open"])
+            lot_size = int(entry_bar["lot_size"])
+            if lot_size <= 0 or not np.isfinite(raw_entry) or not np.isfinite(raw_exit):
+                skip("invalid_fill_or_lot_size")
+                continue
 
-        # Filter actionable trades (BUY / SELL)
-        actionable_trades = signals_df[
-            signals_df["trade_signal"].isin(["BUY", "SELL"])
-        ].copy()
+            # Release positions whose exits occur before this signal's entry.
+            active = [position for position in active if position["exit_time"] > entry_time]
+            if any(position["instrument_key"] == key for position in active):
+                skip("overlapping_same_contract")
+                continue
+            if len(active) >= self.max_concurrent_positions:
+                skip("max_concurrent_positions")
+                continue
 
-        total_signals = len(signals_df)
-        total_actionable = len(actionable_trades)
-
-        logger.info(f"Total signals in dataset: {total_signals:,}")
-        logger.info(f"Actionable trade signals (BUY/SELL): {total_actionable:,}")
-
-        if total_actionable == 0:
-            raise ValueError("No actionable BUY/SELL signals found to backtest.")
-
-        # Sort chronologically by entry timestamp
-        actionable_trades = actionable_trades.sort_values("timestamp").reset_index(drop=True)
-        actionable_trades["target_exit_time"] = (
-            actionable_trades["timestamp"] + pd.Timedelta(minutes=self.horizon_minutes)
-        )
-
-        # Prepare master lookup table
-        master_lookup = master_df[
-            ["instrument_key", "timestamp", "open", "close", "high", "low", "lot_size"]
-        ].sort_values("timestamp").reset_index(drop=True)
-
-        # Match exit price at target horizon using merge_asof (forward direction within 5-min tolerance)
-        merged = pd.merge_asof(
-            actionable_trades.sort_values("target_exit_time"),
-            master_lookup,
-            left_on="target_exit_time",
-            right_on="timestamp",
-            by="instrument_key",
-            direction="forward",
-            tolerance=pd.Timedelta(minutes=5),
-            suffixes=("_entry", "_exit"),
-        ).sort_values("timestamp_entry").reset_index(drop=True)
-
-        # Verify matched exits
-        unmatched = merged["close"].isna().sum()
-        if unmatched > 0:
-            logger.warning(f"Unmatched exit prices for {unmatched} trades; falling back to nearest available price.")
-            merged["close"] = merged["close"].fillna(merged["market_price"])
-
-        # Determine trade execution quantities and prices
-        merged["quantity"] = merged["lot_size"].fillna(65).astype(int)
-        merged["entry_price"] = merged["market_price"]
-        merged["exit_price"] = merged["close"]
-        merged["entry_timestamp"] = merged["timestamp_entry"]
-        merged["exit_timestamp"] = merged["timestamp_exit"].fillna(merged["target_exit_time"])
-        merged["holding_period_mins"] = (
-            (merged["exit_timestamp"] - merged["entry_timestamp"]).dt.total_seconds() / 60.0
-        ).round(1)
-
-        # Calculate P&L, Slippage, and Transaction Costs
-        gross_pnls = []
-        slippage_costs = []
-        transaction_costs = []
-
-        for _, row in merged.iterrows():
-            qty = row["quantity"]
-            p_in = row["entry_price"]
-            p_out = row["exit_price"]
-            sig = row["trade_signal"]
-
-            # Gross P&L Calculation
-            if sig == "BUY":
-                # Buy at p_in, sell at p_out
-                gross = (p_out - p_in) * qty
-                entry_turnover = p_in * qty
-                exit_turnover = p_out * qty
-                stt = exit_turnover * self.stt_rate
+            direction = signal["trade_signal"]
+            lots = self.max_lots
+            if direction == "SELL":
+                if self.short_margin_per_lot <= 0:
+                    skip("short_margin_data_unavailable")
+                    continue
+                capital_per_lot = self.short_margin_per_lot
             else:
-                # Sell (short) at p_in, buy back at p_out
-                gross = (p_in - p_out) * qty
-                entry_turnover = p_in * qty
-                exit_turnover = p_out * qty
-                stt = entry_turnover * self.stt_rate
+                capital_per_lot = raw_entry * lot_size
+            capital_limit = self.initial_capital * self.capital_fraction
+            allocated = sum(position["capital_required"] for position in active)
+            affordable = int(max(0, (capital_limit - allocated) // capital_per_lot)) if capital_per_lot > 0 else 0
+            lots = min(lots, affordable)
+            if lots < 1:
+                skip("capital_limit")
+                continue
+            quantity = lot_size * lots
 
-            # Slippage per share on both legs (entry + exit)
-            slip = (self.slippage_points * 2) * qty
+            half_spread = self.half_spread_points
+            slippage = self.slippage_points
+            if direction == "BUY":
+                fill_entry = raw_entry + half_spread + slippage
+                fill_exit = raw_exit - half_spread - slippage
+                buyer_turnover = fill_entry * quantity
+                seller_turnover = fill_exit * quantity
+                gross = (raw_exit - raw_entry) * quantity
+            else:
+                fill_entry = raw_entry - half_spread - slippage
+                fill_exit = raw_exit + half_spread + slippage
+                seller_turnover = fill_entry * quantity
+                buyer_turnover = fill_exit * quantity
+                gross = (raw_entry - raw_exit) * quantity
+            if min(fill_entry, fill_exit, buyer_turnover, seller_turnover) <= 0:
+                skip("nonpositive_executable_price")
+                continue
 
-            # Brokerage + Turnover Fees + GST + STT
-            other_tax = (entry_turnover + exit_turnover) * self.exchange_txn_rate
-            brokerage = self.brokerage_per_order * 2  # round-trip
-            fee = brokerage + stt + other_tax
+            turnover = (fill_entry + fill_exit) * quantity
+            exchange = turnover * self.exchange_txn_rate
+            sebi = turnover * self.sebi_rate
+            stt = seller_turnover * self._stt_rate(entry_time)
+            stamp = buyer_turnover * self.stamp_duty_rate
+            brokerage = 2.0 * self.brokerage_per_order
+            gst = (brokerage + exchange + sebi) * self.gst_rate
+            statutory_costs = exchange + sebi + stt + stamp + brokerage + gst
+            spread_cost = 2.0 * half_spread * quantity
+            slippage_cost = 2.0 * slippage * quantity
+            net = gross - spread_cost - slippage_cost - statutory_costs
+            capital_required = capital_per_lot * lots
 
-            gross_pnls.append(gross)
-            slippage_costs.append(slip)
-            transaction_costs.append(fee)
+            record = {
+                "timestamp": entry_time,
+                "signal_timestamp": signal["timestamp"],
+                "exit_timestamp": exit_time,
+                "holding_period_mins": (exit_time - entry_time).total_seconds() / 60.0,
+                "instrument_key": key,
+                "trading_symbol": signal.get("trading_symbol"),
+                "option_type": signal.get("option_type"),
+                "strike": signal.get("strike"),
+                "expiry": signal.get("expiry"),
+                "trade_signal": direction,
+                "signal_price": signal.get("market_price"),
+                "entry_reference_open": raw_entry,
+                "exit_reference_open": raw_exit,
+                "entry_price": fill_entry,
+                "exit_price": fill_exit,
+                "lot_size": lot_size,
+                "lots": lots,
+                "quantity": quantity,
+                "capital_required": capital_required,
+                "gross_pnl": gross,
+                "spread_cost": spread_cost,
+                "slippage": slippage_cost,
+                "exchange_charges": exchange,
+                "sebi_charges": sebi,
+                "stt": stt,
+                "stamp_duty": stamp,
+                "brokerage": brokerage,
+                "gst": gst,
+                "transaction_costs": statutory_costs,
+                "total_costs": spread_cost + slippage_cost + statutory_costs,
+                "net_pnl": net,
+                "predicted_probability": signal.get("predicted_probability"),
+                "price_deviation": signal.get("price_deviation"),
+            }
+            records.append(record)
+            active.append({"instrument_key": key, "exit_time": exit_time,
+                           "capital_required": capital_required})
 
-        merged["gross_pnl"] = np.round(gross_pnls, 2)
-        merged["slippage"] = np.round(slippage_costs, 2)
-        merged["transaction_costs"] = np.round(transaction_costs, 2)
-        merged["net_pnl"] = np.round(
-            merged["gross_pnl"] - merged["slippage"] - merged["transaction_costs"], 2
-        )
-        merged["cumulative_pnl"] = np.round(merged["net_pnl"].cumsum(), 2)
-        merged["trade_result"] = np.where(
-            merged["net_pnl"] > 0, "WIN", np.where(merged["net_pnl"] < 0, "LOSS", "BREAKEVEN")
-        )
+        trades = pd.DataFrame(records)
+        if trades.empty:
+            trades = pd.DataFrame(columns=["timestamp", "exit_timestamp", "net_pnl", "gross_pnl"])
+        calendar = pd.Index(pd.Series(market.timestamp.dt.date.unique()).sort_values().unique())
+        if len(calendar) == 0:
+            raise ValueError("No valid market dates available for equity curve")
+        daily_pnl = trades.groupby(trades.exit_timestamp.dt.date).net_pnl.sum() if len(trades) else pd.Series(dtype=float)
+        daily = pd.DataFrame({"trade_date": calendar})
+        daily["net_pnl"] = daily.trade_date.map(daily_pnl).fillna(0.0)
+        daily["timestamp"] = pd.to_datetime(daily.trade_date.astype(str)).dt.tz_localize(MARKET_TZ) + pd.Timedelta(hours=15, minutes=30)
+        daily["cumulative_pnl"] = daily.net_pnl.cumsum()
+        daily["equity"] = self.initial_capital + daily.cumulative_pnl
+        daily["daily_return"] = daily.net_pnl / (daily.equity.shift(1).fillna(self.initial_capital))
+        daily["peak_equity"] = daily.equity.cummax()
+        daily["drawdown"] = daily.peak_equity - daily.equity
+        daily["drawdown_pct"] = daily.drawdown / daily.peak_equity.replace(0, np.nan)
+        if len(trades):
+            trades = trades.sort_values("exit_timestamp").reset_index(drop=True)
+            trades["cumulative_pnl"] = trades.net_pnl.cumsum()
+            trades["trade_result"] = np.where(trades.net_pnl > 0, "WIN", np.where(trades.net_pnl < 0, "LOSS", "BREAKEVEN"))
+        summary = self._compute_summary(trades, daily)
+        return trades, daily, summary
 
-        # Final trade record columns
-        trade_columns = [
-            "entry_timestamp",
-            "exit_timestamp",
-            "holding_period_mins",
-            "trading_symbol",
-            "instrument_key",
-            "option_type",
-            "strike",
-            "expiry",
-            "trade_signal",
-            "entry_price",
-            "exit_price",
-            "quantity",
-            "gross_pnl",
-            "slippage",
-            "transaction_costs",
-            "net_pnl",
-            "cumulative_pnl",
-            "trade_result",
-            "predicted_probability",
-            "confidence",
-            "price_deviation",
-            "theoretical_price",
+    def _compute_summary(self, trades, daily):
+        net = trades.net_pnl if len(trades) else pd.Series(dtype=float)
+        gross = trades.gross_pnl if len(trades) else pd.Series(dtype=float)
+        net_wins = net[net > 0].sum()
+        net_losses = abs(net[net < 0].sum())
+        gross_wins = gross[gross > 0].sum()
+        gross_losses = abs(gross[gross < 0].sum())
+        rf_daily = 0.06 / 252.0
+        excess = daily.daily_return - rf_daily
+        std = daily.daily_return.std(ddof=1)
+        downside = np.sqrt(np.mean(np.minimum(daily.daily_return - rf_daily, 0.0) ** 2))
+        sharpe = excess.mean() / std * np.sqrt(252.0) if std and np.isfinite(std) else np.nan
+        sortino = excess.mean() / downside * np.sqrt(252.0) if downside > 0 else np.nan
+        values = [
+            ("Initial Capital (INR)", self.initial_capital),
+            ("Executed Trades", len(trades)),
+            ("Skipped Signals", sum(self.skipped.values())),
+            ("Skip Reasons", str(self.skipped)),
+            ("Win Rate (%)", float((net > 0).mean() * 100) if len(net) else np.nan),
+            ("Gross P&L (INR)", float(gross.sum())),
+            ("Spread Cost (INR)", float(trades.spread_cost.sum()) if len(trades) else 0.0),
+            ("Slippage (INR)", float(trades.slippage.sum()) if len(trades) else 0.0),
+            ("Transaction Costs (INR)", float(trades.transaction_costs.sum()) if len(trades) else 0.0),
+            ("Net P&L (INR)", float(net.sum())),
+            ("Net Return (%)", float(net.sum() / self.initial_capital * 100)),
+            ("Average Trade Net P&L (INR)", float(net.mean()) if len(net) else np.nan),
+            ("Gross Profit Factor", float(gross_wins / gross_losses) if gross_losses else np.nan),
+            ("Net Profit Factor", float(net_wins / net_losses) if net_losses else np.nan),
+            ("Sharpe Ratio (Daily, annualized)", float(sharpe)),
+            ("Sortino Ratio (Daily, annualized)", float(sortino)),
+            ("Annualized Volatility (%)", float(std * np.sqrt(252.0) * 100) if np.isfinite(std) else np.nan),
+            ("Maximum Drawdown (INR)", float(daily.drawdown.max())),
+            ("Maximum Drawdown (%)", float(daily.drawdown_pct.max() * 100)),
         ]
+        return pd.DataFrame([{"Metric": k, "Value": v} for k, v in values])
 
-        trades_df = merged[[col for col in trade_columns if col in merged.columns]].copy()
-        trades_df = trades_df.rename(columns={"entry_timestamp": "timestamp"})
+    def run_backtest(self):
+        signals, market = self.load_data()
+        trades, equity, summary = self.simulate(signals, market)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        trades.to_parquet(self.output_dir / "backtest_trades.parquet", index=False)
+        summary.to_csv(self.output_dir / "backtest_summary.csv", index=False)
+        equity.to_csv(self.output_dir / "equity_curve.csv", index=False)
+        return trades, equity, summary
 
-        # Build Equity Curve & Drawdown Series
-        equity_curve_df = trades_df[
-            ["timestamp", "trade_signal", "trading_symbol", "net_pnl", "cumulative_pnl"]
-        ].copy()
-        equity_curve_df["peak_pnl"] = equity_curve_df["cumulative_pnl"].cummax()
-        equity_curve_df["drawdown"] = equity_curve_df["peak_pnl"] - equity_curve_df["cumulative_pnl"]
-
-        # Calculate Summary Metrics
-        summary_df = self._compute_summary(trades_df, equity_curve_df)
-
-        # Save files
-        self._save_results(trades_df, equity_curve_df, summary_df)
-
-        return trades_df, equity_curve_df, summary_df
-
-    def _compute_summary(
-        self, trades_df: pd.DataFrame, equity_curve_df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """Compute performance and risk metrics."""
-        total_trades = len(trades_df)
-        winning_trades = int((trades_df["net_pnl"] > 0).sum())
-        losing_trades = int((trades_df["net_pnl"] < 0).sum())
-        breakeven_trades = int((trades_df["net_pnl"] == 0).sum())
-        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
-
-        total_gross_pnl = float(trades_df["gross_pnl"].sum())
-        total_slippage = float(trades_df["slippage"].sum())
-        total_transaction_costs = float(trades_df["transaction_costs"].sum())
-        total_costs = total_slippage + total_transaction_costs
-        total_net_pnl = float(trades_df["net_pnl"].sum())
-
-        max_drawdown = float(equity_curve_df["drawdown"].max())
-        avg_trade_net_pnl = total_net_pnl / total_trades if total_trades > 0 else 0.0
-
-        gross_wins = trades_df.loc[trades_df["gross_pnl"] > 0, "gross_pnl"].sum()
-        gross_losses = abs(trades_df.loc[trades_df["gross_pnl"] < 0, "gross_pnl"].sum())
-        profit_factor = (gross_wins / gross_losses) if gross_losses > 0 else np.nan
-
-        avg_win = trades_df.loc[trades_df["net_pnl"] > 0, "net_pnl"].mean() if winning_trades > 0 else 0.0
-        avg_loss = abs(trades_df.loc[trades_df["net_pnl"] < 0, "net_pnl"].mean()) if losing_trades > 0 else 0.0
-        win_loss_ratio = (avg_win / avg_loss) if avg_loss > 0 else np.nan
-
-        # Sharpe ratio on trade returns (annualized ~ 252 days * 12 thirty-min periods)
-        std_pnl = trades_df["net_pnl"].std()
-        sharpe = (trades_df["net_pnl"].mean() / std_pnl * np.sqrt(252 * 12)) if (std_pnl and std_pnl > 0) else 0.0
-
-        summary_data = [
-            {"Metric": "Total Trades", "Value": f"{total_trades}"},
-            {"Metric": "Winning Trades", "Value": f"{winning_trades}"},
-            {"Metric": "Losing Trades", "Value": f"{losing_trades}"},
-            {"Metric": "Breakeven Trades", "Value": f"{breakeven_trades}"},
-            {"Metric": "Win Rate (%)", "Value": f"{win_rate:.2f}%"},
-            {"Metric": "Total Gross P&L (Rs)", "Value": f"{total_gross_pnl:,.2f}"},
-            {"Metric": "Total Slippage (Rs)", "Value": f"{total_slippage:,.2f}"},
-            {"Metric": "Total Transaction Costs (Rs)", "Value": f"{total_transaction_costs:,.2f}"},
-            {"Metric": "Total Costs (Rs)", "Value": f"{total_costs:,.2f}"},
-            {"Metric": "Total Net P&L (Rs)", "Value": f"{total_net_pnl:,.2f}"},
-            {"Metric": "Average Trade Net P&L (Rs)", "Value": f"{avg_trade_net_pnl:,.2f}"},
-            {"Metric": "Average Win (Rs)", "Value": f"{avg_win:,.2f}"},
-            {"Metric": "Average Loss (Rs)", "Value": f"{avg_loss:,.2f}"},
-            {"Metric": "Win / Loss Payoff Ratio", "Value": f"{win_loss_ratio:.2f}"},
-            {"Metric": "Profit Factor", "Value": f"{profit_factor:.2f}"},
-            {"Metric": "Maximum Drawdown (Rs)", "Value": f"{max_drawdown:,.2f}"},
-            {"Metric": "Annualized Sharpe Ratio", "Value": f"{sharpe:.2f}"},
-        ]
-
-        return pd.DataFrame(summary_data)
-
-    def _save_results(
-        self,
-        trades_df: pd.DataFrame,
-        equity_curve_df: pd.DataFrame,
-        summary_df: pd.DataFrame,
-    ) -> None:
-        """Persist parquet and csv outputs."""
-        trades_path = self.output_dir / "backtest_trades.parquet"
-        summary_path = self.output_dir / "backtest_summary.csv"
-        equity_path = self.output_dir / "equity_curve.csv"
-
-        trades_df.to_parquet(trades_path, index=False)
-        summary_df.to_csv(summary_path, index=False)
-        equity_curve_df.to_csv(equity_path, index=False)
-
-        logger.info(f"Saved trades to: {trades_path}")
-        logger.info(f"Saved summary to: {summary_path}")
-        logger.info(f"Saved equity curve to: {equity_path}")
-
-
-# =====================================================================
-# CLI ENTRYPOINT
-# =====================================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Backtest options arbitrage BUY/SELL signals chronologically."
-    )
-    parser.add_argument(
-        "--signals-file",
-        type=Path,
-        default=Path("data/processed/trade_signals.parquet"),
-        help="Path to actionable trade signals parquet file.",
-    )
-    parser.add_argument(
-        "--master-file",
-        type=Path,
-        default=Path("data/processed/master_options.parquet"),
-        help="Path to master options dataset containing price history.",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("data/processed"),
-        help="Output directory for backtest artifacts.",
-    )
-    parser.add_argument(
-        "--horizon-minutes",
-        type=int,
-        default=DEFAULT_HORIZON_MINUTES,
-        help="Trade holding period in minutes (default: 30).",
-    )
-    parser.add_argument(
-        "--slippage-points",
-        type=float,
-        default=DEFAULT_SLIPPAGE_POINTS,
-        help="Slippage in index points/premium per share per leg (default: 0.15).",
-    )
-    parser.add_argument(
-        "--brokerage",
-        type=float,
-        default=DEFAULT_BROKERAGE_PER_ORDER,
-        help="Brokerage cost per order in INR (default: 20.0).",
-    )
-    parser.add_argument(
-        "--stt-rate",
-        type=float,
-        default=DEFAULT_STT_RATE,
-        help="STT rate on sell turnover (default: 0.000625).",
-    )
-    parser.add_argument(
-        "--exchange-txn-rate",
-        type=float,
-        default=DEFAULT_EXCHANGE_TXN_RATE,
-        help="Exchange turnover & statutory charges rate (default: 0.0005).",
-    )
-
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--signals-file", type=Path, default=Path("data/processed/trade_signals.parquet"))
+    parser.add_argument("--master-file", type=Path, default=Path("data/processed/master_options.parquet"))
+    parser.add_argument("--output-dir", type=Path, default=Path("data/processed"))
+    parser.add_argument("--horizon-minutes", type=int, default=DEFAULT_HORIZON_MINUTES)
+    parser.add_argument("--capital", type=float, default=DEFAULT_INITIAL_CAPITAL)
+    parser.add_argument("--max-concurrent-positions", type=int, default=DEFAULT_MAX_CONCURRENT_POSITIONS)
+    parser.add_argument("--max-lots", type=int, default=DEFAULT_MAX_LOTS)
+    parser.add_argument("--half-spread-points", type=float, default=DEFAULT_HALF_SPREAD_POINTS)
+    parser.add_argument("--slippage-points", type=float, default=DEFAULT_SLIPPAGE_POINTS)
+    parser.add_argument("--short-margin-per-lot", type=float, default=0.0,
+                        help="Required to enable SELL trades; supply a conservative historical margin proxy.")
     args = parser.parse_args()
-
-    print("=" * 80)
-    print("RUNNING CHRONOLOGICAL OPTIONS ARBITRAGE BACKTEST")
-    print("=" * 80)
-    print(f"Signals file:          {args.signals_file.resolve()}")
-    print(f"Master price file:     {args.master_file.resolve()}")
-    print(f"Holding horizon:       {args.horizon_minutes} minutes")
-    print(f"Slippage per leg:      Rs {args.slippage_points:.2f} per unit")
-    print(f"Brokerage per order:   Rs {args.brokerage:.2f}")
-    print("=" * 80)
-
-    backtester = OptionsArbitrageBacktester(
-        signals_file=args.signals_file,
-        master_file=args.master_file,
-        output_dir=args.output_dir,
+    engine = OptionsArbitrageBacktester(
+        args.signals_file, args.master_file, args.output_dir,
         horizon_minutes=args.horizon_minutes,
+        initial_capital=args.capital,
+        max_concurrent_positions=args.max_concurrent_positions,
+        max_lots=args.max_lots,
+        half_spread_points=args.half_spread_points,
         slippage_points=args.slippage_points,
-        brokerage_per_order=args.brokerage,
-        stt_rate=args.stt_rate,
-        exchange_txn_rate=args.exchange_txn_rate,
+        short_margin_per_lot=args.short_margin_per_lot,
     )
-
-    trades_df, equity_curve_df, summary_df = backtester.run_backtest()
-
-    print("\n" + "=" * 80)
-    print("BACKTEST RESULTS SUMMARY")
-    print("=" * 80)
-    for _, row in summary_df.iterrows():
-        print(f"{row['Metric']:<30}: {row['Value']}")
-    print("=" * 80)
-
-    print("\nSample Executed Trades (First 5):")
-    cols_to_show = [
-        "timestamp",
-        "trading_symbol",
-        "trade_signal",
-        "entry_price",
-        "exit_price",
-        "gross_pnl",
-        "transaction_costs",
-        "slippage",
-        "net_pnl",
-        "cumulative_pnl",
-    ]
-    print(trades_df[cols_to_show].head(5).to_string(index=False))
-    print("=" * 80)
+    trades, equity, summary = engine.run_backtest()
+    print(summary.to_string(index=False))
+    print(f"\nExecuted trades: {len(trades)}; equity dates: {len(equity)}")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import pandas as pd
 
 from config import (
     STRIKES_EACH_SIDE,
+    UPSTOX_RAW_DIR,
 )
 
 from strike_selector import (
@@ -27,6 +28,9 @@ def get_nifty_dataframe(date):
     Download NIFTY 1-minute candles for one date.
     """
 
+    cache = UPSTOX_RAW_DIR / "nifty_1minute" / f"{date}.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
     data = get_nifty_candles(date)
 
     if not data:
@@ -56,6 +60,11 @@ def get_nifty_dataframe(date):
     df = df.sort_values(
         "timestamp"
     ).reset_index(drop=True)
+    df["bar_minutes"] = 1
+
+    # Preserve original minute observations for reproducible close alignment.
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(cache, index=False)
 
     return df
 

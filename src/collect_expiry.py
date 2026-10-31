@@ -1,4 +1,7 @@
 import pandas as pd
+import json
+from datetime import datetime, timezone
+from candle_alignment import align_option_spot_candles
 
 from config import (
     UPSTOX_RAW_DIR,
@@ -11,6 +14,7 @@ from prepare_expiry import (
 
 from upstox_api import (
     get_expired_candles,
+    UpstoxAPIError,
 )
 
 
@@ -28,6 +32,9 @@ def collect_expiry(
     Dynamic strike selection is performed independently
     for every trading session.
     """
+    output_file = UPSTOX_RAW_DIR / f"expiry_{expiry_date}.parquet"
+    if output_file.exists():
+        raise FileExistsError(f"Preserving existing raw file: {output_file}; use the separate repair path")
 
     print()
     print("=" * 80)
@@ -72,7 +79,7 @@ def collect_expiry(
     print()
     print(
         f"Historical window:"
-        f" {from_date} → {to_date}"
+        f" {from_date} -> {to_date}"
     )
 
     # --------------------------------------------------------
@@ -185,6 +192,11 @@ def collect_expiry(
 
             option_frames.append(df)
 
+        except UpstoxAPIError as e:
+            if e.status_code in (401, 403, 429, 200):
+                raise
+            print(f"  ERROR: {e}")
+            failed_contracts.append(instrument_key)
         except Exception as e:
 
             print(
@@ -357,41 +369,15 @@ def collect_expiry(
         columns=["trade_date"]
     )
 
-# Final timestamp alignment
-    merged = pd.merge_asof(
-        options_df.sort_values("timestamp"),
-        nifty_df.sort_values("timestamp"),
-        on="timestamp",
-        direction="backward",
-        tolerance=pd.Timedelta(minutes=1),
+    # Candle labels are starts: the 09:15 option close is observed at
+    # 09:20 and must match the 09:19 one-minute spot candle's close.
+    merged = align_option_spot_candles(
+        options_df, nifty_df.rename(columns={"nifty_spot": "close"})
     )
-# --------------------------------------------------------
-# Remove option candles after the NIFTY trading session
-# --------------------------------------------------------
-# Upstox expired option data can contain a 15:35 candle,
-# while NIFTY spot data ends before that timestamp.
-#
-# We do not want to invent/fill a NIFTY spot value for it.
-# Therefore keep only option timestamps that can be
-# matched to actual NIFTY data.
-
-    latest_nifty_timestamp = nifty_df["timestamp"].max()
-
-    options_df = options_df[
-        options_df["timestamp"] <= latest_nifty_timestamp
-    ].copy()
-
-# --------------------------------------------------------
-# Align NIFTY spot to option timestamps
-# --------------------------------------------------------
-
-    merged = pd.merge_asof(
-        options_df,
-        nifty_df,
-        on="timestamp",
-        direction="backward",
-        tolerance=pd.Timedelta(minutes=1),
-)
+    missing_aligned_spot = int(merged["nifty_spot"].isna().sum())
+    if missing_aligned_spot:
+        print(f"Skipping {missing_aligned_spot:,} option rows without an exact synchronized spot close")
+    merged = merged.loc[merged["nifty_spot"].notna()].copy()
     # --------------------------------------------------------
     # Daily dynamic strike filter
     # --------------------------------------------------------
@@ -456,10 +442,26 @@ def collect_expiry(
         / f"expiry_{expiry_date}.parquet"
     )
 
+    # Validate before writing raw output, and make partial collection observable.
+    observed_sessions = set(merged["trade_date"].astype(str))
+    if merged.empty or observed_sessions != set(str(day) for day in trading_dates):
+        raise RuntimeError("Collected rows do not cover every requested session; raw output was not written")
+    if merged["nifty_spot"].isna().any() or merged.duplicated(["instrument_key", "timestamp"]).any():
+        raise RuntimeError("Invalid synchronized prices or duplicate keys; raw output was not written")
+
     merged.to_parquet(
         output_file,
         index=False,
     )
+    output_file.with_suffix(".manifest.json").write_text(json.dumps({
+        "expiry": expiry_date, "requested_sessions": number_of_sessions,
+        "trading_dates": [str(day) for day in trading_dates],
+        "requested_contracts": len(required_contracts),
+        "observed_contracts": int(merged["instrument_key"].nunique()),
+        "failed_contracts": failed_contracts, "all_requested_contracts_returned": not failed_contracts,
+        "rows": len(merged), "option_bar_minutes": 5, "spot_bar_minutes": 1,
+        "alignment": "exact_close_availability", "created_at": datetime.now(timezone.utc).isoformat(),
+    }, indent=2), encoding="utf-8")
 
     # --------------------------------------------------------
     # Validation

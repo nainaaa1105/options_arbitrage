@@ -19,13 +19,14 @@ Fields Produced:
 - predicted_class
 - confidence (abs(probability - 0.5))
 - confidence_margin
-- signal_action (CONVERGENCE_BUY, NO_TRADE, ABSTAIN_BORDERLINE)
+- signal_action (CONVERGENCE_CANDIDATE, NO_TRADE)
 - is_high_confidence
 - trading_symbol
 - instrument_key
 """
 
 import argparse
+import json
 from pathlib import Path
 import warnings
 warnings.filterwarnings("ignore")
@@ -36,6 +37,7 @@ import joblib
 
 # Import feature builder from train_models
 from train_models import build_features
+from research_targets import session_horizon_eligible
 
 
 # ============================================================
@@ -44,11 +46,11 @@ from train_models import build_features
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TEST_FILE   = PROJECT_ROOT / "data" / "processed" / "ml_splits" / "test.parquet"
-DEFAULT_MODEL_FILE  = PROJECT_ROOT / "data" / "processed" / "models" / "best_model_xgboost.joblib"
+DEFAULT_MODEL_FILE  = PROJECT_ROOT / "data" / "processed" / "models" / "best_model.joblib"
 DEFAULT_FEAT_FILE   = PROJECT_ROOT / "data" / "processed" / "models" / "best_model_feature_columns.joblib"
 DEFAULT_MED_FILE    = PROJECT_ROOT / "data" / "processed" / "models" / "best_model_imputer_medians.joblib"
 DEFAULT_OUTPUT_FILE = PROJECT_ROOT / "data" / "processed" / "trading_signals.parquet"
-DEFAULT_CONF_MARGIN = 0.20
+DEFAULT_CONF_MARGIN = None
 
 
 def generate_trading_signals(
@@ -57,7 +59,7 @@ def generate_trading_signals(
     feat_cols_path: Path = DEFAULT_FEAT_FILE,
     medians_path: Path = DEFAULT_MED_FILE,
     output_path: Path = DEFAULT_OUTPUT_FILE,
-    confidence_margin: float = DEFAULT_CONF_MARGIN
+    confidence_margin: float | None = DEFAULT_CONF_MARGIN
 ) -> pd.DataFrame:
     """
     Generates predictions and trading signals on the test dataset using the pre-trained model.
@@ -67,7 +69,21 @@ def generate_trading_signals(
     print("=" * 80)
     print(f"Test dataset:         {test_path}")
     print(f"Production model:     {model_path}")
-    print(f"Confidence threshold: +/- {confidence_margin:.2f}")
+    config_path = model_path.parent / "best_model_config.json"
+    config = {}
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as stream:
+            config = json.load(stream)
+    if confidence_margin is None:
+        if config_path.exists():
+            with open(config_path, encoding="utf-8") as stream:
+                probability_threshold = float(json.load(stream)["threshold"])
+        else:
+            probability_threshold = 0.5
+        confidence_margin = probability_threshold - 0.5
+    else:
+        probability_threshold = 0.5 + confidence_margin
+    print(f"Validation-selected probability threshold: {probability_threshold:.3f}")
 
     # 1. Load test dataset
     if not test_path.exists():
@@ -84,20 +100,21 @@ def generate_trading_signals(
         raise FileNotFoundError(f"Model file not found at {model_path}")
     model = joblib.load(model_path)
     feature_columns = joblib.load(feat_cols_path)
-    imputer_medians = joblib.load(medians_path)
     print(f"Model loaded:         {type(model).__name__}")
     print(f"Feature columns:      {len(feature_columns)} features")
 
     # 3. Build features
     print("\nEngineering features on test split...")
-    processed_dict = build_features({"test": test_raw})
+    processed_dict = build_features(
+        {"test": test_raw}, feature_schema_version=config.get("feature_schema_version", 1)
+    )
     test_processed = processed_dict["test"]
 
     # Restore exact original row order
     test_processed = test_processed.sort_values("_original_order").reset_index(drop=True)
 
     # 4. Prepare feature matrix with exact production imputation
-    X_test_df = test_processed[feature_columns].fillna(imputer_medians)
+    X_test_df = test_processed[feature_columns]
     X_test_mat = X_test_df.values
 
     # 5. Model Inference
@@ -106,16 +123,12 @@ def generate_trading_signals(
 
     # 6. Compute Confidence and Signal Decisions
     confidence = np.abs(pred_probs - 0.50)
-    pred_classes = np.where(pred_probs >= 0.50, 1, 0)
+    pred_classes = np.where(pred_probs >= probability_threshold, 1, 0)
 
-    hi_thr = 0.50 + confidence_margin
-    lo_thr = 0.50 - confidence_margin
-
-    signal_actions = np.where(
-        pred_probs >= hi_thr,
-        "CONVERGENCE_BUY",
-        np.where(pred_probs <= lo_thr, "NO_TRADE", "ABSTAIN_BORDERLINE")
-    )
+    hi_thr = probability_threshold
+    horizon_eligible = session_horizon_eligible(test_processed["timestamp"], horizon_minutes=30)
+    active = (pred_probs >= hi_thr) & horizon_eligible.to_numpy()
+    signal_actions = np.where(active, "CONVERGENCE_CANDIDATE", "NO_TRADE")
 
     # 7. Construct Trading Signals DataFrame
     signals_df = pd.DataFrame({
@@ -128,10 +141,13 @@ def generate_trading_signals(
         "price_deviation": test_processed["reference_price_deviation"].astype(float),
         "predicted_probability": pred_probs.astype(float),
         "predicted_class": pred_classes.astype(int),
+        "predicted_class_at_0_50": (pred_probs >= .50).astype(int),
+        "horizon_eligible": horizon_eligible.to_numpy(),
         "confidence": confidence.astype(float),
         "confidence_margin": float(confidence_margin),
+        "probability_threshold": probability_threshold,
         "signal_action": signal_actions,
-        "is_high_confidence": (confidence >= confidence_margin).astype(bool),
+        "is_high_confidence": active.astype(bool),
         "instrument_key": test_processed["instrument_key"],
         "trading_symbol": test_processed["trading_symbol"],
     })
@@ -148,18 +164,17 @@ def generate_trading_signals(
     # 9. Summary & Metrics
     n_total = len(signals_df)
     n_high_conf = int(signals_df["is_high_confidence"].sum())
-    n_buy = int((signals_df["signal_action"] == "CONVERGENCE_BUY").sum())
+    n_buy = int((signals_df["signal_action"] == "CONVERGENCE_CANDIDATE").sum())
     n_no_trade = int((signals_df["signal_action"] == "NO_TRADE").sum())
-    n_abstain = int((signals_df["signal_action"] == "ABSTAIN_BORDERLINE").sum())
+    n_abstain = 0
 
     print("\n" + "=" * 80)
     print("TRADING SIGNALS SUMMARY")
     print("=" * 80)
     print(f"Total Evaluated Options:      {n_total:,}")
     print(f"High-Confidence Signals:      {n_high_conf:,} ({(n_high_conf / n_total) * 100:.1f}% coverage)")
-    print(f"  - CONVERGENCE_BUY (P>={hi_thr:.2f}): {n_buy:,}")
-    print(f"  - NO_TRADE (P<={lo_thr:.2f}):        {n_no_trade:,}")
-    print(f"  - ABSTAIN_BORDERLINE:       {n_abstain:,}")
+    print(f"  - CONVERGENCE_CANDIDATE (P>={hi_thr:.3f}): {n_buy:,}")
+    print(f"  - NO_TRADE:                                  {n_no_trade:,}")
     print(f"Mean Predicted Probability:   {pred_probs.mean():.4f}")
     print(f"Mean Confidence Score:        {confidence.mean():.4f}")
 
@@ -173,11 +188,11 @@ def generate_trading_signals(
             )
             print(f"System Accuracy on Active Signals: {active_acc * 100:.2f}%")
         if n_buy > 0:
-            buy_acc = accuracy_score(
-                signals_df.loc[signals_df["signal_action"] == "CONVERGENCE_BUY", "actual_target"],
+            candidate_precision = accuracy_score(
+                signals_df.loc[signals_df["signal_action"] == "CONVERGENCE_CANDIDATE", "actual_target"],
                 np.ones(n_buy)
             )
-            print(f"Long Entry Win Rate (CONVERGENCE_BUY):   {buy_acc * 100:.2f}%")
+            print(f"Convergence precision among candidates: {candidate_precision * 100:.2f}%")
 
     print("=" * 80)
     return signals_df
@@ -191,12 +206,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate trading signals using the production options arbitrage model."
     )
-    parser.add_argument(
-        "--confidence-margin",
-        type=float,
-        default=DEFAULT_CONF_MARGIN,
-        help=f"Confidence margin around 0.50 (default: {DEFAULT_CONF_MARGIN:.2f} => P<={0.50-DEFAULT_CONF_MARGIN:.2f} or P>={0.50+DEFAULT_CONF_MARGIN:.2f})."
-    )
+    parser.add_argument('--allow-legacy-artifacts', action='store_true', help='Explicit opt-in for preserved data/processed model/context.')
+    parser.add_argument('--context-file', type=Path, help='Matching causal context for a custom legacy-format model.')
+    parser.add_argument('--feature-columns-file', type=Path)
+    parser.add_argument('--medians-file', type=Path)
+    parser.add_argument("--confidence-margin", type=float, default=DEFAULT_CONF_MARGIN,
+                        help="Optional compatibility override; default uses threshold selected on validation.")
     parser.add_argument(
         "--test-file",
         type=str,
@@ -216,12 +231,19 @@ def main():
         help="Path to output trading signals parquet file."
     )
     args = parser.parse_args()
+    if Path(args.model_file).resolve() == DEFAULT_MODEL_FILE.resolve() and not args.allow_legacy_artifacts:
+        parser.error('Legacy default model is not the corrected research model. Use predict_research_model.py --registry REGISTRY --input INPUT --output OUTPUT, or explicitly opt into --allow-legacy-artifacts.')
+    if Path(args.model_file).resolve() != DEFAULT_MODEL_FILE.resolve() and args.context_file is None:
+        parser.error('A custom model requires its matching --context-file; frozen research bundles use predict_research_model.py.')
+    if args.context_file:
+        import train_models
+        train_models.CONTEXT_FILE = args.context_file
 
     generate_trading_signals(
         test_path=Path(args.test_file),
         model_path=Path(args.model_file),
-        feat_cols_path=DEFAULT_FEAT_FILE,
-        medians_path=DEFAULT_MED_FILE,
+        feat_cols_path=args.feature_columns_file or Path(args.model_file).parent/DEFAULT_FEAT_FILE.name,
+        medians_path=args.medians_file or Path(args.model_file).parent/DEFAULT_MED_FILE.name,
         output_path=Path(args.output_file),
         confidence_margin=args.confidence_margin
     )

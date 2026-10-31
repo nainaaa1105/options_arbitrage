@@ -1,0 +1,85 @@
+{
+  "cutoff": "2026-09-15",
+  "folds": 5,
+  "embargo_sessions": 1,
+  "tune_on": "V1-V3",
+  "compare_on": "V4-V5",
+  "history_rows": 107474,
+  "fresh_rows_not_read_until_freeze": 12466,
+  "base_features": 121,
+  "new_features": 41,
+  "feature_groups": {
+    "dev_dynamics": [
+      "dev_lag3",
+      "dev_lag4",
+      "dev_lag6",
+      "dev_roll_mean6",
+      "dev_roll_std6",
+      "dev_z6",
+      "dev_ewm",
+      "absdev_mom3",
+      "absdev_mom6",
+      "absdev_frac_of_day_max",
+      "dev_sign_flips6",
+      "dev_same_sign_run"
+    ],
+    "price_dynamics": [
+      "ret3",
+      "ret6",
+      "ret_vol6",
+      "price_range_pos6"
+    ],
+    "staleness": [
+      "stale_run",
+      "stale_frac6",
+      "zero_volume_run",
+      "vol_sum3",
+      "vol_ratio_3_12",
+      "oi_change1"
+    ],
+    "iv_dynamics": [
+      "iv_change3",
+      "iv_change6",
+      "ref_iv_change3",
+      "resid_lag1",
+      "resid_mean3",
+      "parity_lag1",
+      "parity_mean3"
+    ],
+    "smile": [
+      "smile_slope",
+      "smile_curv",
+      "smile_n",
+      "iv_minus_smile",
+      "atm_iv_own",
+      "put_call_iv_spread"
+    ],
+    "smile_dynamics": [
+      "atm_iv_change6",
+      "smile_slope_change6",
+      "atm_iv_vs_open"
+    ],
+    "cross_section": [
+      "absdev_rank_ts",
+      "volume_rank_expiry",
+      "absdev_x_logvol3"
+    ]
+  },
+  "baseline_hyperparameters": {
+    "n_estimators": 200,
+    "learning_rate": 0.05,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_child_samples": 60,
+    "reg_lambda": 20.0,
+    "subsample": 0.8,
+    "subsample_freq": 1,
+    "colsample_bytree": 0.8,
+    "n_jobs": 4,
+    "random_state": 42,
+    "verbosity": -1
+  },
+  "optuna_trials": 20,
+  "selection_rule": "highest mean AUC on V4-V5 among candidates; ties to simpler",
+  "fresh_status": "reviewed during baseline development; single evaluation after freeze; NOT pristine"
+}

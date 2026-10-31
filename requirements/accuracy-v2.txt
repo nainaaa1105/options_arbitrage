@@ -1,0 +1,2 @@
+# Optional, for src/accuracy_v2. Installed with --no-deps to leave pinned packages untouched.
+catboost==1.2.10

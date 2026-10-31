@@ -1,0 +1,3 @@
+# Optional Part 2 dependency. Install CPU wheels from the official PyTorch index:
+# python -m pip install --index-url https://download.pytorch.org/whl/cpu -r requirements/deep-hedging.txt
+torch>=2.6,<3

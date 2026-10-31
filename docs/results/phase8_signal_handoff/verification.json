@@ -1,0 +1,33 @@
+{
+  "part1_equivalence": {
+    "part1_episodes": 1680,
+    "part1_path_rows": 11760,
+    "rebuild_skipped": 0
+  },
+  "builder_reproduces_part1_exactly": true,
+  "max_reconciliation_error": 2.3856046027503908e-09,
+  "probabilities_from_past_fit_only": true,
+  "controls_within_ml_slots": true,
+  "selections_frozen_before_outcomes": {
+    "frozen_at": "2026-10-31T12:54:54.352797+00:00",
+    "selections_sha256": "ea674ec6147b3b7a2bfe4dd84fe6bcd2530da315602afc4fea8a30bb82f404e1",
+    "rows": 6188,
+    "outcomes_computed_before_freeze": false
+  },
+  "shorts_used": false,
+  "primary_tau_all_period_verdicts": {
+    "random/unhedged": "no detectable difference",
+    "random/static_delta": "no detectable difference",
+    "random/dynamic_delta": "no detectable difference",
+    "random/band_delta": "no detectable difference",
+    "max_deviation/unhedged": "no detectable difference",
+    "max_deviation/static_delta": "no detectable difference",
+    "max_deviation/dynamic_delta": "ML higher",
+    "max_deviation/band_delta": "ML higher",
+    "atm_nearest/unhedged": "no detectable difference",
+    "atm_nearest/static_delta": "ML lower",
+    "atm_nearest/dynamic_delta": "ML lower",
+    "atm_nearest/band_delta": "ML lower"
+  },
+  "profitability_established": false
+}

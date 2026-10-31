@@ -41,10 +41,8 @@ UPSTOX_ACCESS_TOKEN = os.getenv(
     "UPSTOX_ACCESS_TOKEN"
 )
 
-if not UPSTOX_ACCESS_TOKEN:
-    raise RuntimeError(
-        "UPSTOX_ACCESS_TOKEN not found in .env"
-    )
+# Offline pricing/audits import these constants too. Authentication is required
+# by upstox_api.make_request only when an actual API operation is attempted.
 
 
 

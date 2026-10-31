@@ -7,6 +7,7 @@ from config import (
 
 from upstox_api import (
     get_expiries,
+    UpstoxAPIError,
 )
 
 from collect_expiry import (
@@ -43,25 +44,26 @@ TEST_EXPIRIES = [
 # SELECT EXPIRIES
 
 
-def select_expiries(all_expiries):
+def select_expiries(all_expiries, run_mode=None):
+    mode = RUN_MODE if run_mode is None else run_mode
 
     all_expiries = sorted(
         all_expiries
     )
 
-    if RUN_MODE == 3:
+    if mode == 3:
 
         return TEST_EXPIRIES
 
-    if RUN_MODE == 10:
+    if mode == 10:
 
         return all_expiries[-10:]
 
-    if RUN_MODE == 30:
+    if mode == 30:
 
         return all_expiries[-30:]
 
-    if RUN_MODE == "ALL":
+    if mode == "ALL":
 
         return all_expiries
 
@@ -76,6 +78,18 @@ def select_expiries(all_expiries):
 
 
 def main():
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description="Resume expiry collection without editing source constants")
+    parser.add_argument("--run-mode", choices=["3", "10", "30", "ALL"], default=str(RUN_MODE))
+    parser.add_argument("--sessions-per-expiry", type=int, default=HISTORICAL_TRADING_SESSIONS)
+    parser.add_argument("--from-expiry")
+    parser.add_argument("--to-expiry")
+    parser.add_argument("--expiries-file", type=Path, help="Optional JSON list of known expiry dates, including older gaps")
+    parser.add_argument("--plan-only", action="store_true", help="Print the requested collection plan without downloading contracts/candles")
+    args = parser.parse_args()
+    if args.sessions_per_expiry < 1:
+        parser.error("sessions-per-expiry must be positive")
 
     print("=" * 80)
     print("OPTIONS DATA COLLECTION")
@@ -83,14 +97,14 @@ def main():
 
     print(
         f"Historical sessions per expiry: "
-        f"{HISTORICAL_TRADING_SESSIONS}"
+        f"{args.sessions_per_expiry}"
     )
 
     
     # Get all available expired expiries
     
 
-    all_expiries = get_expiries()
+    all_expiries = json.loads(args.expiries_file.read_text()) if args.expiries_file else get_expiries()
 
     if not all_expiries:
 
@@ -112,10 +126,15 @@ def main():
     
 
     selected_expiries = (
-        select_expiries(
-            all_expiries
-        )
+        select_expiries(all_expiries, "ALL" if args.run_mode == "ALL" else int(args.run_mode))
     )
+    selected_expiries = [date for date in selected_expiries
+                        if (not args.from_expiry or date >= args.from_expiry)
+                        and (not args.to_expiry or date <= args.to_expiry)]
+    if args.plan_only:
+        print(json.dumps({"expiries": selected_expiries, "sessions_per_expiry": args.sessions_per_expiry,
+                          "resume_existing": True}, indent=2))
+        return
 
     print()
     print(
@@ -160,6 +179,12 @@ def main():
         
 
         if output_file.exists():
+            manifest_path = output_file.with_suffix(".manifest.json")
+            existing_status = "already_exists_unverified"
+            if manifest_path.exists():
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                existing_status = ("already_exists_verified" if manifest.get("all_requested_contracts_returned")
+                                   else "already_exists_with_failed_contracts")
 
             print(
                 f"ALREADY EXISTS: "
@@ -171,7 +196,7 @@ def main():
                     "expiry":
                         expiry_date,
                     "status":
-                        "already_exists",
+                        existing_status,
                 }
             )
 
@@ -185,7 +210,7 @@ def main():
 
             df = collect_expiry(
                 expiry_date,
-                HISTORICAL_TRADING_SESSIONS,
+                args.sessions_per_expiry,
             )
 
             results.append(
@@ -207,6 +232,10 @@ def main():
                 }
             )
 
+        except UpstoxAPIError as e:
+            if e.status_code in (401, 403, 429, 200):
+                raise
+            results.append({"expiry": expiry_date, "status": "failed", "error": str(e)})
         except Exception as e:
 
             print()

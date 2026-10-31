@@ -1,322 +1,186 @@
+"""Build a leave-one-out implied-volatility reference surface.
+
+Each surface is isolated by timestamp, expiry, and option type.  The estimate
+uses neighboring log-moneyness observations and never uses the target row's IV.
+"""
+
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-INPUT_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "options_volatility_features.parquet"
-)
-
-OUTPUT_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "options_reference_iv.parquet"
-)
-
-# Number of neighboring observations used on each side
-NEIGHBOR_COUNT = 3
-
-# Minimum valid IV observations required for interpolation
-MIN_VALID_POINTS = 4
+INPUT_FILE = PROJECT_ROOT / "data" / "processed" / "options_volatility_features.parquet"
+OUTPUT_FILE = PROJECT_ROOT / "data" / "processed" / "options_reference_iv.parquet"
+MIN_VALID_POINTS = 2
+MAX_EXTRAPOLATION_LOG_MONEYNESS = 0.03
 
 
-# ============================================================
-# LOAD
-# ============================================================
+def calculate_reference_iv(
+    group: pd.DataFrame,
+    min_valid_points: int = MIN_VALID_POINTS,
+    max_extrapolation_log_moneyness: float = MAX_EXTRAPOLATION_LOG_MONEYNESS,
+) -> pd.DataFrame:
+    """Estimate reference IV row by row within one timestamp/expiry/type group.
 
-print("=" * 80)
-print("BUILDING REFERENCE IV SURFACE")
-print("=" * 80)
+    IVs at duplicate coordinates are median-aggregated after excluding the
+    target row. Interior values are linearly interpolated; edge estimates use
+    the nearest observation only within the configured log-moneyness distance.
+    """
+    required = {"implied_volatility", "strike"}
+    missing = required.difference(group.columns)
+    if missing:
+        raise ValueError(f"Missing columns for reference IV: {sorted(missing)}")
+    if min_valid_points < 2:
+        raise ValueError("min_valid_points must be at least 2")
 
-print(f"Input:  {INPUT_FILE}")
-print(f"Output: {OUTPUT_FILE}")
+    out = group.copy()
+    iv = pd.to_numeric(out["implied_volatility"], errors="coerce").to_numpy(float)
+    strike = pd.to_numeric(out["strike"], errors="coerce").to_numpy(float)
+    if "log_moneyness" in out:
+        x = pd.to_numeric(out["log_moneyness"], errors="coerce").to_numpy(float)
+    elif "nifty_spot" in out:
+        spot = pd.to_numeric(out["nifty_spot"], errors="coerce").to_numpy(float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            x = np.log(strike / spot)
+    else:
+        raise ValueError("Reference IV requires log_moneyness or nifty_spot")
 
-df = pd.read_parquet(INPUT_FILE)
+    valid = np.isfinite(iv) & (iv > 0) & (iv <= 5.0) & np.isfinite(x)
+    refs = np.full(len(out), np.nan, dtype=float)
+    methods = np.full(len(out), "insufficient_points", dtype=object)
+    valid_indices = np.flatnonzero(valid)
+    order = np.argsort(x[valid_indices])
+    sorted_indices = valid_indices[order]
+    # The normal option chain has one valid contract at each coordinate. Compute
+    # its leave-one-out neighbors in arrays; keep duplicate handling below.
+    coordinates = x[sorted_indices]
+    if len(coordinates) and np.all(np.diff(coordinates) > 1e-12):
+        values = iv[sorted_indices]
+        pos = np.searchsorted(coordinates, x, side="left")
+        left, right = pos - 1, pos + valid.astype(int)
+        enough = (len(coordinates) - valid.astype(int)) >= min_valid_points
+        finite = np.isfinite(x)
+        methods[~finite] = "invalid_target_coordinate"
+        right_clipped = np.clip(right, 0, len(coordinates) - 1)
+        exact = (finite & enough & ~valid & (right < len(coordinates))
+                 & np.isclose(coordinates[right_clipped], x, rtol=0., atol=1e-12))
+        refs[exact] = values[right_clipped[exact]]
+        methods[exact] = "other_contract_same_coordinate"
+        interior = finite & enough & ~exact & (left >= 0) & (right < len(coordinates))
+        a, b = left[interior], right[interior]
+        refs[interior] = values[a] + (x[interior] - coordinates[a]) * (values[b] - values[a]) / (coordinates[b] - coordinates[a])
+        methods[interior] = "interpolated"
+        edge = finite & enough & ~exact & ~interior
+        nearest = np.clip(np.where(left < 0, right, left), 0, len(coordinates) - 1)
+        close = np.abs(coordinates[nearest] - x) <= max_extrapolation_log_moneyness
+        accepted = edge & close
+        refs[accepted] = values[nearest[accepted]]
+        methods[accepted] = "nearest_edge_extrapolation"
+        methods[edge & ~close] = "extrapolation_too_far"
+        out["reference_iv"] = refs
+        out["reference_iv_method"] = methods
+        return out
+    sorted_x, inverse = np.unique(x[sorted_indices], return_inverse=True)
+    sorted_iv = iv[sorted_indices]
+    # Surface groups are small (normally one contract per strike); aggregate
+    # duplicates once, then use array searches for each leave-one-out estimate.
+    medians = np.array([
+        np.median(sorted_iv[inverse == j]) for j in range(len(sorted_x))
+    ])
+    counts = np.bincount(inverse, minlength=len(sorted_x))
+    unique_by_row = np.full(len(out), -1, dtype=int)
+    unique_by_row[sorted_indices] = inverse
 
-print(f"\nInput rows: {len(df):,}")
-
-
-# ============================================================
-# PREPARE
-# ============================================================
-
-required_columns = [
-    "timestamp",
-    "trade_date",
-    "option_type",
-    "strike",
-    "nifty_spot",
-    "time_to_expiry",
-    "implied_volatility",
-    "iv_status",
-    "market_price",
-    "log_moneyness",
-]
-
-missing = [
-    column
-    for column in required_columns
-    if column not in df.columns
-]
-
-if missing:
-    raise ValueError(
-        f"Missing required columns: {missing}"
-    )
-
-
-# ============================================================
-# SORT
-# ============================================================
-
-df = df.sort_values(
-    [
-        "timestamp",
-        "option_type",
-        "strike",
-    ]
-).reset_index(drop=True)
-
-
-# ============================================================
-# REFERENCE IV FUNCTION
-# ============================================================
-
-def calculate_reference_iv(group):
-
-    group = group.copy()
-
-    iv = group["implied_volatility"].to_numpy(
-        dtype=float
-    )
-
-    strike = group["strike"].to_numpy(
-        dtype=float
-    )
-
-    valid = (
-        np.isfinite(iv)
-        &
-        (iv > 0)
-        &
-        (iv <= 5.0)
-    )
-
-    reference_iv = np.full(
-        len(group),
-        np.nan,
-        dtype=float
-    )
-
-    valid_indices = np.where(valid)[0]
-
-    if len(valid_indices) < MIN_VALID_POINTS:
-        group["reference_iv"] = reference_iv
-        return group
-
-    valid_strikes = strike[valid]
-
-    valid_ivs = iv[valid]
-
-    # --------------------------------------------------------
-    # Interpolate across strike
-    # --------------------------------------------------------
-
-    for i in range(len(group)):
-
-        # Do not use the option's own IV directly
-        other_mask = valid_indices != i
-
-        other_indices = valid_indices[
-            other_mask
-        ]
-
-        if len(other_indices) < MIN_VALID_POINTS:
+    for i, target_x in enumerate(x):
+        if not np.isfinite(target_x):
+            methods[i] = "invalid_target_coordinate"
             continue
 
-        other_strikes = strike[
-            other_indices
-        ]
+        px = sorted_x
+        py = medians
+        own_coordinate = unique_by_row[i] if valid[i] else -1
+        if own_coordinate >= 0:
+            if counts[own_coordinate] == 1:
+                keep = np.arange(len(sorted_x)) != own_coordinate
+                px, py = sorted_x[keep], medians[keep]
+            else:
+                same_coordinate_rows = np.flatnonzero(
+                    valid & np.isclose(x, target_x, rtol=0.0, atol=1e-12)
+                )
+                peers = iv[same_coordinate_rows[same_coordinate_rows != i]]
+                if len(peers):
+                    py = medians.copy()
+                    py[own_coordinate] = np.median(peers)
 
-        other_ivs = iv[
-            other_indices
-        ]
-
-        target_strike = strike[i]
-
-        # Sort by distance from target
-        distances = np.abs(
-            other_strikes - target_strike
-        )
-
-        order = np.argsort(distances)
-
-        selected = order[
-            :min(
-                NEIGHBOR_COUNT * 2,
-                len(order)
-            )
-        ]
-
-        x = other_strikes[selected]
-        y = other_ivs[selected]
-
-        # Need enough distinct strikes
-        if len(np.unique(x)) < 2:
+        if len(px) < min_valid_points:
             continue
-
-        # Sort x for interpolation
-        sort_order = np.argsort(x)
-
-        x = x[sort_order]
-        y = y[sort_order]
-
-        # ----------------------------------------------------
-        # Linear interpolation
-        # ----------------------------------------------------
-        #
-        # If target lies inside the neighboring strike range,
-        # interpolate.
-        #
-        # If it is outside, use the nearest valid observation
-        # only when the distance is small.
-        # ----------------------------------------------------
-
-        if (
-            target_strike >= x.min()
-            and target_strike <= x.max()
-        ):
-
-            reference = np.interp(
-                target_strike,
-                x,
-                y
-            )
-
+        pos = int(np.searchsorted(px, target_x, side="left"))
+        if pos < len(px) and np.isclose(px[pos], target_x, rtol=0.0, atol=1e-12):
+            refs[i] = py[pos]
+            methods[i] = "other_contract_same_coordinate"
+        elif 0 < pos < len(px):
+            x0, x1 = px[pos - 1], px[pos]
+            y0, y1 = py[pos - 1], py[pos]
+            refs[i] = y0 + (target_x - x0) * (y1 - y0) / (x1 - x0)
+            methods[i] = "interpolated"
         else:
+            edge = 0 if pos == 0 else len(px) - 1
+            if abs(px[edge] - target_x) <= max_extrapolation_log_moneyness:
+                refs[i] = py[edge]
+                methods[i] = "nearest_edge_extrapolation"
+            else:
+                methods[i] = "extrapolation_too_far"
 
-            nearest = np.argmin(
-                np.abs(x - target_strike)
-            )
-
-            reference = y[nearest]
-
-        reference_iv[i] = reference
-
-    group["reference_iv"] = reference_iv
-
-    return group
+    out["reference_iv"] = refs
+    out["reference_iv_method"] = methods
+    return out
 
 
-# ============================================================
-# APPLY BY TIMESTAMP + OPTION TYPE
-# ============================================================
+def add_reference_iv_surface(df: pd.DataFrame) -> pd.DataFrame:
+    """Add expiry-isolated leave-one-out reference IV and residual features."""
+    keys = ["timestamp", "expiry", "option_type"]
+    required = set(keys) | {"strike", "implied_volatility"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns for reference surface: {sorted(missing)}")
 
-print(
-    "\nCalculating leave-one-out reference IV..."
-)
-
-groups = []
-
-for (timestamp, option_type), group in df.groupby(
-    ["timestamp", "option_type"],
-    sort=False
-):
-    result = calculate_reference_iv(group)
-
-    result["timestamp"] = timestamp
-    result["option_type"] = option_type
-
-    groups.append(result)
-
-df = pd.concat(
-    groups,
-    ignore_index=True
-)
-
-
-# ============================================================
-# REFERENCE IV DIFFERENCE
-# ============================================================
-
-df["iv_surface_residual"] = (
-    df["implied_volatility"]
-    - df["reference_iv"]
-)
-
-
-df["iv_surface_residual_pct"] = np.where(
-    df["reference_iv"] > 0,
-    (
-        df["implied_volatility"]
-        - df["reference_iv"]
+    out = df.copy()
+    out["_reference_row_id"] = np.arange(len(out))
+    # Carry only coordinates/IV through thousands of small surface groups.
+    # Retaining all OHLC/Greeks columns per group needlessly multiplies memory.
+    surface_columns = keys + ["strike", "implied_volatility", "_reference_row_id"]
+    surface_columns += [c for c in ("log_moneyness", "nifty_spot") if c in out]
+    parts = []
+    for _, group in out[surface_columns].groupby(keys, sort=False, dropna=False):
+        reference = calculate_reference_iv(group)
+        parts.append(reference[["_reference_row_id", "reference_iv", "reference_iv_method"]])
+    reference = pd.concat(parts, ignore_index=True).sort_values("_reference_row_id")
+    out["reference_iv"] = reference.reference_iv.to_numpy()
+    out["reference_iv_method"] = reference.reference_iv_method.to_numpy()
+    out = out.drop(columns="_reference_row_id").reset_index(drop=True)
+    out["iv_surface_residual"] = out["implied_volatility"] - out["reference_iv"]
+    out["iv_surface_residual_pct"] = np.where(
+        out["reference_iv"] > 0,
+        out["iv_surface_residual"] / out["reference_iv"],
+        np.nan,
     )
-    / df["reference_iv"],
-    np.nan,
-)
+    return out
 
 
-# ============================================================
-# VALIDATION SUMMARY
-# ============================================================
-
-print("\n" + "=" * 80)
-print("REFERENCE IV SUMMARY")
-print("=" * 80)
-
-valid_reference = (
-    df["reference_iv"].notna()
-)
-
-print(
-    f"Valid reference IV: "
-    f"{valid_reference.sum():,}"
-)
-
-print(
-    f"Missing reference IV: "
-    f"{(~valid_reference).sum():,}"
-)
-
-print("\nReference IV statistics:")
-
-print(
-    df["reference_iv"]
-    .describe()
-    .to_string()
-)
-
-print("\nIV surface residual statistics:")
-
-print(
-    df["iv_surface_residual"]
-    .describe()
-    .to_string()
-)
+def main() -> None:
+    print("BUILDING EXPIRY-ISOLATED REFERENCE IV SURFACE")
+    print(f"Input:  {INPUT_FILE}")
+    print(f"Output: {OUTPUT_FILE}")
+    df = pd.read_parquet(INPUT_FILE)
+    result = add_reference_iv_surface(df)
+    print(f"Rows: {len(result):,}")
+    print(f"Valid reference IV: {result['reference_iv'].notna().sum():,}")
+    print(result["reference_iv_method"].value_counts(dropna=False).to_string())
+    result.to_parquet(OUTPUT_FILE, index=False)
+    print(f"Saved: {OUTPUT_FILE}")
 
 
-# ============================================================
-# SAVE
-# ============================================================
-
-df.to_parquet(
-    OUTPUT_FILE,
-    index=False
-)
-
-print("REFERENCE IV BUILD COMPLETE")
-
-print(
-    f"Saved: {OUTPUT_FILE}"
-)
+if __name__ == "__main__":
+    main()

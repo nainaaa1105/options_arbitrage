@@ -177,6 +177,8 @@ ml_columns = (
         "expiry",
         "instrument_key",
         "trading_symbol",
+        "future_timestamp_30m",
+        "future_timestamp_60m",
     ]
     + available_features
     + [

@@ -1,0 +1,82 @@
+{
+  "rows": 12466,
+  "sessions": 28,
+  "positive_rate": 0.35512594256377344,
+  "training_majority_accuracy": 0.6448740574362265,
+  "at_050": {
+    "threshold": 0.5,
+    "accuracy": 0.7267768329857212,
+    "precision": 0.6456490727532097,
+    "recall": 0.5111813869437543,
+    "f1": 0.570600100857287,
+    "specificity": 0.845503172036323,
+    "false_positive_rate": 0.15449682796367709,
+    "predicted_positive_rate": 0.2811647681694208,
+    "matthews_corrcoef": 0.3796800993092836,
+    "roc_auc": 0.7884181792438169,
+    "pr_auc": 0.6605013512715909,
+    "balanced_accuracy": 0.6783422794900387,
+    "brier_score": 0.17550821412046702,
+    "log_loss": 0.5136266779244327,
+    "expected_calibration_error_10bin": 0.010545179819321172,
+    "tn": 6797,
+    "fp": 1242,
+    "fn": 2164,
+    "tp": 2263
+  },
+  "at_frozen_threshold": {
+    "threshold": 0.53,
+    "accuracy": 0.7248515963420504,
+    "precision": 0.6623249755779876,
+    "recall": 0.45945335441608315,
+    "f1": 0.5425446785809549,
+    "specificity": 0.87100385620102,
+    "false_positive_rate": 0.12899614379897997,
+    "predicted_positive_rate": 0.24635007219637414,
+    "matthews_corrcoef": 0.3670140646670639,
+    "roc_auc": 0.7884181792438169,
+    "pr_auc": 0.6605013512715909,
+    "balanced_accuracy": 0.6652286053085517,
+    "brier_score": 0.17550821412046702,
+    "log_loss": 0.5136266779244327,
+    "expected_calibration_error_10bin": 0.010545179819321172,
+    "tn": 7002,
+    "fp": 1037,
+    "fn": 2393,
+    "tp": 2034
+  },
+  "baseline_at_050": {
+    "threshold": 0.5,
+    "accuracy": 0.7219637413765442,
+    "precision": 0.6291319537758667,
+    "recall": 0.5288005421278518,
+    "f1": 0.5746195385370643,
+    "specificity": 0.8283368578181366,
+    "false_positive_rate": 0.1716631421818634,
+    "predicted_positive_rate": 0.2984918979624579,
+    "matthews_corrcoef": 0.3734920533455977,
+    "roc_auc": 0.782525430226314,
+    "pr_auc": 0.644252525801619,
+    "balanced_accuracy": 0.6785686999729942,
+    "brier_score": 0.17833122662083803,
+    "log_loss": 0.5207274480433026,
+    "expected_calibration_error_10bin": 0.018453051333593113,
+    "tn": 6659,
+    "fp": 1380,
+    "fn": 2086,
+    "tp": 2341
+  },
+  "paired_vs_baseline": {
+    "accuracy_diff": 0.004813091609176978,
+    "accuracy_ci95": [
+      -0.0013410331847059725,
+      0.010950621216307506
+    ],
+    "auc_diff": 0.0058927490175028074,
+    "auc_ci95": [
+      0.0011182093337955446,
+      0.01093441908402322
+    ],
+    "method": "session-cluster bootstrap"
+  }
+}

@@ -1,0 +1,3 @@
+# Tested CPU build; install base requirements separately.
+--index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0+cpu

@@ -1,302 +1,148 @@
+"""Build point-in-time historical volatility features.
+
+Daily volatility for an observation on trading date *d* is computed only from
+daily close-to-close returns through the prior completed trading date.  This is
+deliberately shifted by one day before it is joined to intraday option rows.
+"""
+
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-INPUT_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "options_features.parquet"
-)
-
-OUTPUT_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "options_volatility_features.parquet"
-)
-
-WINDOWS = [5, 10, 20]
+INPUT_FILE = PROJECT_ROOT / "data" / "processed" / "options_features.parquet"
+OUTPUT_FILE = PROJECT_ROOT / "data" / "processed" / "options_volatility_features.parquet"
+WINDOWS = (5, 10, 20)
+MARKET_TZ = "Asia/Kolkata"
 
 
-# ============================================================
-# LOAD DATA
-# ============================================================
-
-print("=" * 80)
-print("BUILDING CORRECT HISTORICAL VOLATILITY FEATURES")
-print("=" * 80)
-
-print(f"Input:  {INPUT_FILE}")
-print(f"Output: {OUTPUT_FILE}")
-
-df = pd.read_parquet(INPUT_FILE)
-
-print(f"\nInput rows: {len(df):,}")
+def _as_market_date(series: pd.Series) -> pd.Series:
+    """Normalize trade dates to Python dates without changing their local day."""
+    return pd.to_datetime(series, errors="coerce").dt.date
 
 
-# ============================================================
-# PREPARE TIMESTAMP
-# ============================================================
+def make_daily_spot(df: pd.DataFrame) -> pd.DataFrame:
+    """Return one observed daily close per trading date, in timestamp order."""
+    required = {"timestamp", "trade_date", "nifty_spot"}
+    missing = required.difference(df.columns)
+    if missing:
+        raise ValueError(f"Missing columns for daily spot series: {sorted(missing)}")
 
-df["timestamp"] = pd.to_datetime(df["timestamp"])
+    spot = df[["timestamp", "trade_date", "nifty_spot"]].copy()
+    spot["timestamp"] = pd.to_datetime(spot["timestamp"], errors="coerce")
+    if spot["timestamp"].dt.tz is None:
+        spot["timestamp"] = spot["timestamp"].dt.tz_localize(MARKET_TZ)
+    else:
+        spot["timestamp"] = spot["timestamp"].dt.tz_convert(MARKET_TZ)
+    spot["trade_date"] = _as_market_date(spot["trade_date"])
+    spot["nifty_spot"] = pd.to_numeric(spot["nifty_spot"], errors="coerce")
+    calendar = pd.DataFrame({
+        "trade_date": pd.Index(spot["trade_date"].dropna().unique()).sort_values()
+    })
+    valid = spot.dropna(subset=["trade_date", "timestamp", "nifty_spot"])
+    valid = valid.loc[valid["nifty_spot"] > 0]
 
-if df["timestamp"].dt.tz is None:
-    df["timestamp"] = df["timestamp"].dt.tz_localize(
-        "Asia/Kolkata"
+    # Select the last actual timestamp row, rather than independently taking
+    # the last non-null value in each column.
+    last_observation = (
+        valid.sort_values("timestamp")
+        .groupby("trade_date", sort=True, as_index=False)
+        .tail(1)
+        .sort_values("trade_date")
+        .reset_index(drop=True)[["trade_date", "nifty_spot"]]
     )
-else:
-    df["timestamp"] = df["timestamp"].dt.tz_convert(
-        "Asia/Kolkata"
-    )
-
-
-# ============================================================
-# CHECK NIFTY SPOT COLUMN
-# ============================================================
-
-if "nifty_spot" not in df.columns:
-    raise ValueError(
-        "Column 'nifty_spot' was not found in the dataset."
-    )
-
-
-# ============================================================
-# BUILD DAILY NIFTY SERIES
-# ============================================================
-
-print("\nBuilding daily NIFTY spot series...")
-
-spot_df = (
-    df[
-        [
-            "timestamp",
-            "trade_date",
-            "nifty_spot",
-        ]
-    ]
-    .dropna(subset=["nifty_spot"])
-    .sort_values("timestamp")
-    .copy()
-)
-
-# Make sure trade_date is a date
-spot_df["trade_date"] = pd.to_datetime(
-    spot_df["trade_date"]
-).dt.date
-
-
-# ------------------------------------------------------------
-# Use the LAST NIFTY observation of each trading day.
-#
-# This gives us the daily closing/reference spot.
-# ------------------------------------------------------------
-
-daily_spot = (
-    spot_df
-    .groupby("trade_date", as_index=False)
-    .last()
-    .sort_values("trade_date")
-    .reset_index(drop=True)
-)
-
-daily_spot = daily_spot[
-    [
-        "trade_date",
-        "nifty_spot",
-    ]
-]
-
-print(
-    f"Trading days available: "
-    f"{len(daily_spot):,}"
-)
-
-
-# ============================================================
-# DAILY LOG RETURNS
-# ============================================================
-
-print("\nCalculating daily NIFTY log returns...")
-
-daily_spot["log_return"] = np.log(
-    daily_spot["nifty_spot"]
-    / daily_spot["nifty_spot"].shift(1)
-)
-
-
-# ============================================================
-# HISTORICAL VOLATILITY
-# ============================================================
-
-print("\nCalculating historical volatility...")
-
-for window in WINDOWS:
-
-    column = f"historical_volatility_{window}d"
-
-    daily_spot[column] = (
-        daily_spot["log_return"]
-        .rolling(window=window)
-        .std()
-        * np.sqrt(252)
-    )
-
-    print(
-        f"Created: {column}"
-    )
-
-
-# ============================================================
-# KEEP ONLY FEATURES TO MERGE
-# ============================================================
-
-volatility_columns = [
-    "trade_date"
-]
-
-for window in WINDOWS:
-
-    volatility_columns.append(
-        f"historical_volatility_{window}d"
-    )
-
-
-volatility_df = daily_spot[
-    volatility_columns
-].copy()
-
-
-# ============================================================
-# MERGE DAILY HV INTO OPTION DATA
-# ============================================================
-
-print("\nMerging daily volatility into option data...")
-
-df["trade_date"] = pd.to_datetime(
-    df["trade_date"]
-).dt.date
-
-df = df.merge(
-    volatility_df,
-    on="trade_date",
-    how="left",
-)
-
-
-# ============================================================
-# IV - HV FEATURES
-# ============================================================
-
-print("\nCalculating IV-HV features...")
-
-for window in WINDOWS:
-
-    hv_column = (
-        f"historical_volatility_{window}d"
-    )
-
-    difference_column = (
-        f"iv_minus_hv_{window}d"
-    )
-
-    ratio_column = (
-        f"iv_hv_ratio_{window}d"
-    )
-
-    df[difference_column] = (
-        df["implied_volatility"]
-        - df[hv_column]
-    )
-
-    df[ratio_column] = np.where(
-        df[hv_column] > 0,
-        df["implied_volatility"]
-        / df[hv_column],
-        np.nan,
-    )
-
-
-# ============================================================
-# SUMMARY
-# ============================================================
-
-print("\n" + "=" * 80)
-print("VOLATILITY FEATURE SUMMARY")
-print("=" * 80)
-
-print(
-    f"Rows: {len(df):,}"
-)
-
-print(
-    f"Trading days: "
-    f"{df['trade_date'].nunique():,}"
-)
-
-for window in WINDOWS:
-
-    hv_column = (
-        f"historical_volatility_{window}d"
-    )
-
-    diff_column = (
-        f"iv_minus_hv_{window}d"
-    )
-
-    ratio_column = (
-        f"iv_hv_ratio_{window}d"
-    )
-
-    print(
-        f"\n{window}-DAY HISTORICAL VOLATILITY"
-    )
-
-    print("-" * 80)
-
-    print(
-        df[hv_column]
-        .describe()
-        .to_string()
-    )
-
-    print(
-        f"\nValid HV: "
-        f"{df[hv_column].notna().sum():,}"
-    )
-
-    print(
-        f"Valid IV-HV difference: "
-        f"{df[diff_column].notna().sum():,}"
-    )
-
-    print(
-        f"Valid IV/HV ratio: "
-        f"{df[ratio_column].notna().sum():,}"
-    )
-
-
-# ============================================================
-# SAVE
-# ============================================================
-
-df.to_parquet(
-    OUTPUT_FILE,
-    index=False,
-)
-
-print("\n" + "=" * 80)
-print("VOLATILITY FEATURE BUILD COMPLETE")
-print("=" * 80)
-
-print(
-    f"Saved: {OUTPUT_FILE}"
-)
+    # Keep sessions with no usable spot as explicit missing rows so returns
+    # cannot bridge across the missing session as if it were one trading day.
+    return calendar.merge(last_observation, on="trade_date", how="left")
+
+
+def calculate_daily_hv(daily_spot: pd.DataFrame, windows=WINDOWS,
+                       max_calendar_gap_days=7) -> pd.DataFrame:
+    """Calculate annualized HV for each date using completed prior-day returns."""
+    if not {"trade_date", "nifty_spot"}.issubset(daily_spot.columns):
+        raise ValueError("daily_spot must contain trade_date and nifty_spot")
+
+    daily = daily_spot.copy().sort_values("trade_date").reset_index(drop=True)
+    prices = pd.to_numeric(daily["nifty_spot"], errors="coerce")
+    prices = prices.where(np.isfinite(prices) & (prices > 0))
+    returns = np.log(prices / prices.shift(1))
+    calendar_gap = pd.to_datetime(daily["trade_date"]).diff().dt.days
+    if max_calendar_gap_days is not None:
+        if max_calendar_gap_days < 1:
+            raise ValueError("max_calendar_gap_days must be positive")
+        # This conservative guard handles missing coverage, not an exchange
+        # holiday calendar. A dedicated complete daily spot history is preferred.
+        long_gap = calendar_gap > max_calendar_gap_days
+        returns = returns.mask(long_gap)
+    else:
+        long_gap = pd.Series(False, index=daily.index)
+
+    for window in windows:
+        if window < 2:
+            raise ValueError("HV windows must be at least 2 daily returns")
+        column = f"historical_volatility_{window}d"
+        # At date d, rolling HV is lagged: no close or return from d is used.
+        daily[column] = (
+            returns.rolling(window=window, min_periods=window)
+            .std(ddof=1)
+            .shift(1)
+            * np.sqrt(252.0)
+        ).mask(long_gap)
+    return daily[["trade_date", *(f"historical_volatility_{w}d" for w in windows)]]
+
+
+def add_historical_volatility_features(
+    df: pd.DataFrame, windows=WINDOWS, daily_spot=None, max_calendar_gap_days=7
+) -> pd.DataFrame:
+    """Attach prior-completed-day HV and IV/HV features to option rows."""
+    out = df.copy()
+    out["trade_date"] = _as_market_date(out["trade_date"])
+    source = make_daily_spot(out) if daily_spot is None else daily_spot
+    daily = calculate_daily_hv(source, windows=windows,
+                               max_calendar_gap_days=max_calendar_gap_days)
+    daily["trade_date"] = _as_market_date(daily["trade_date"])
+    out = out.drop(
+        columns=[c for c in daily.columns if c != "trade_date" and c in out.columns]
+    ).merge(daily, on="trade_date", how="left", validate="many_to_one")
+
+    for window in windows:
+        hv = out[f"historical_volatility_{window}d"]
+        out[f"iv_minus_hv_{window}d"] = out["implied_volatility"] - hv
+        out[f"iv_hv_ratio_{window}d"] = np.where(
+            hv > 0, out["implied_volatility"] / hv, np.nan
+        )
+    return out
+
+
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--input", type=Path, default=INPUT_FILE)
+    parser.add_argument("--output", type=Path, default=OUTPUT_FILE)
+    parser.add_argument("--daily-spot", type=Path,
+                        help="Complete independent daily NIFTY Parquet history: timestamp, close")
+    args = parser.parse_args()
+    print("BUILDING POINT-IN-TIME HISTORICAL VOLATILITY FEATURES")
+    print(f"Input:  {INPUT_FILE}")
+    print(f"Output: {OUTPUT_FILE}")
+    df = pd.read_parquet(args.input)
+    daily = None
+    if args.daily_spot:
+        daily = pd.read_parquet(args.daily_spot).rename(columns={"close": "nifty_spot"})
+        daily["timestamp"] = pd.to_datetime(daily["timestamp"])
+        daily["trade_date"] = daily.timestamp.dt.date
+        daily = make_daily_spot(daily)
+    result = add_historical_volatility_features(df, daily_spot=daily)
+    print(f"Rows: {len(result):,}; trading dates: {result['trade_date'].nunique():,}")
+    for window in WINDOWS:
+        col = f"historical_volatility_{window}d"
+        print(f"{col}: {result[col].notna().sum():,} valid rows")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    result.to_parquet(args.output, index=False)
+    print(f"Saved: {args.output}")
+
+
+if __name__ == "__main__":
+    main()

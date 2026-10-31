@@ -1,0 +1,44 @@
+{
+  "numerical_gates": [
+    {
+      "objective": "cvar",
+      "spec": "mlp_delta",
+      "delta_mae": 0.021481024101376534,
+      "std_over_delta": 1.1020351741266095,
+      "passed": true
+    },
+    {
+      "objective": "cvar",
+      "spec": "gru_delta",
+      "delta_mae": 0.019568271934986115,
+      "std_over_delta": 1.0848411410606449,
+      "passed": true
+    },
+    {
+      "objective": "entropic",
+      "spec": "mlp_delta",
+      "delta_mae": 0.005911371670663357,
+      "std_over_delta": 1.007145102832815,
+      "passed": true
+    },
+    {
+      "objective": "entropic",
+      "spec": "gru_delta",
+      "delta_mae": 0.005366487428545952,
+      "std_over_delta": 1.0071200085149161,
+      "passed": true
+    }
+  ],
+  "numerical_gates_pass": true,
+  "replay_max_abs_error": 2.384185791015625e-07,
+  "chunk_invariance_max_abs_error": 2.384185791015625e-07,
+  "max_reconciliation_error": 2.6728957891464233e-07,
+  "checkpoints_replayed": 20,
+  "frozen_checkpoints_unchanged": true,
+  "test_retuning": false,
+  "validation_seed": 735001,
+  "test_seed": 785001,
+  "independent_of_phase4_7_5_seeds": true,
+  "same_test_paths_across_cost_levels_and_objectives": true,
+  "real_market_profitability_established": false
+}

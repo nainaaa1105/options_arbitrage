@@ -1,0 +1,6 @@
+strategy,members,rollout_ms_per_1024_paths,note
+mlp_single,1,107.04379999879166,"CPU, 2 threads, 32 steps; relative indication only"
+gru_single,1,87.29440000024624,"CPU, 2 threads, 32 steps; relative indication only"
+mlp_seed_mean,3,258.7859999985085,"CPU, 2 threads, 32 steps; relative indication only"
+gru_seed_mean,3,102.01619999861578,"CPU, 2 threads, 32 steps; relative indication only"
+cross_family_mean,6,250.7592999972985,"CPU, 2 threads, 32 steps; relative indication only"

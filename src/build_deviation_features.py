@@ -131,10 +131,17 @@ def calculate_reference_price(row):
         return np.nan
 
 
-df["reference_theoretical_price"] = df.apply(
-    calculate_reference_price,
-    axis=1,
-)
+use_vectorized = False
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--vectorized", action="store_true")
+    use_vectorized = parser.parse_args().vectorized
+if use_vectorized:
+    from vector_pricing import batch_reference_prices
+    df["reference_theoretical_price"] = batch_reference_prices(df)
+else:
+    df["reference_theoretical_price"] = df.apply(calculate_reference_price, axis=1)
 
 
 # ============================================================

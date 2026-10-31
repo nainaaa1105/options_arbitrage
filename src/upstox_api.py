@@ -1,5 +1,6 @@
 import time
 import requests
+from http_transport import verified_session
 
 from config import (
     BASE_URL,
@@ -14,6 +15,21 @@ HEADERS = {
     "Authorization": f"Bearer {UPSTOX_ACCESS_TOKEN}",
     "Accept": "application/json",
 }
+
+_SESSION = None
+
+
+class UpstoxAPIError(RuntimeError):
+    def __init__(self, message, status_code=None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _session():
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = verified_session()
+    return _SESSION
 
 
 
@@ -36,7 +52,7 @@ def make_request(url, params=None):
 
         try:
 
-            response = requests.get(
+            response = _session().get(
                 url,
                 headers=HEADERS,
                 params=params,
@@ -44,8 +60,14 @@ def make_request(url, params=None):
             )
 
             if response.status_code == 200:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    raise UpstoxAPIError("HTTP 200 response is not JSON", 200) from None
+                if not isinstance(payload, dict) or payload.get("status") != "success":
+                    raise UpstoxAPIError("HTTP 200 response did not report API success", 200)
                 time.sleep(REQUEST_DELAY_SECONDS)
-                return response.json()
+                return payload
 
             last_error = (
                 f"HTTP {response.status_code}: "
@@ -55,7 +77,7 @@ def make_request(url, params=None):
             # Authentication / permission errors should
             # not be retried repeatedly.
             if response.status_code in [400, 401, 403]:
-                raise RuntimeError(last_error)
+                raise UpstoxAPIError(last_error, response.status_code)
 
             print(
                 f"Request failed "
@@ -76,9 +98,9 @@ def make_request(url, params=None):
         if attempt < MAX_RETRIES:
             time.sleep(attempt)
 
-    raise RuntimeError(
+    raise UpstoxAPIError(
         f"Request failed after {MAX_RETRIES} attempts: "
-        f"{last_error}"
+        f"{last_error}", response.status_code if 'response' in locals() else None
     )
 
 

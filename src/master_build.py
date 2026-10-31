@@ -10,8 +10,15 @@ OUTPUT_FILE = OUTPUT_DIR / "master_options.parquet"
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Build the raw candle union; use a separate output before close-alignment repair")
+    parser.add_argument("--raw-dir", type=Path, default=UPSTOX_RAW_DIR)
+    parser.add_argument("--output", type=Path, default=OUTPUT_FILE)
+    args = parser.parse_args()
+    if args.output.exists() and args.output.resolve() != OUTPUT_FILE.resolve():
+        raise FileExistsError(f"Preserving existing staged master: {args.output}")
 
-    files = sorted(UPSTOX_RAW_DIR.glob("expiry_*.parquet"))
+    files = sorted(args.raw_dir.glob("expiry_*.parquet"))
 
     print("BUILDING MASTER DATASET")
 
@@ -128,7 +135,7 @@ def main():
     print(
         f"Timestamp range: "
         f"{master['timestamp'].min()} "
-        f"→ "
+        f"-> "
         f"{master['timestamp'].max()}"
     )
     
@@ -154,13 +161,14 @@ def main():
     # Save
     
 
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     master.to_parquet(
-        OUTPUT_FILE,
+        args.output,
         index=False,
     )
 
     print()
-    print(f"Saved: {OUTPUT_FILE}")
+    print(f"Saved: {args.output}")
     print()
     print("MASTER DATASET BUILD PASSED")
 

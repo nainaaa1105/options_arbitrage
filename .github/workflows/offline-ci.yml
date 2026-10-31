@@ -1,0 +1,25 @@
+name: offline-tests
+# Credential-free: tools/run_offline_tests.py blocks sockets and blanks UPSTOX_ACCESS_TOKEN.
+# Tests that need locally generated research artifacts (data/research, gitignored) skip or fail visibly on a fresh clone;
+# see docs/OPERATIONS_PHASE_0B.md for the list. No secrets are configured or required.
+on:
+  push:
+  pull_request:
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install base and CPU-only deep learning dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt matplotlib
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.6,<3"
+      - name: Show which test modules are eligible
+        run: python tools/run_offline_tests.py --list
+      - name: Run offline suite
+        run: python tools/run_offline_tests.py

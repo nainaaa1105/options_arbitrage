@@ -77,6 +77,8 @@ FORBIDDEN_COLUMNS = [
 
     # Future / label construction
     "future_timestamp",
+    "future_timestamp_30m",
+    "future_timestamp_60m",
     "future_deviation",
     "deviation_reduction_30m",
     "label_valid_30m",
@@ -237,12 +239,30 @@ train = df.loc[train_mask].copy()
 valid = df.loc[valid_mask].copy()
 test = df.loc[test_mask].copy()
 
+# Purge any labeled observation whose target window reaches into the next
+# chronological split. Whole-day partitions normally leave an overnight gap,
+# but this check makes the non-overlap guarantee explicit and data-driven.
+train_boundary = valid["timestamp"].min()
+valid_boundary = test["timestamp"].min()
+train_before_purge = len(train)
+valid_before_purge = len(valid)
+if "future_timestamp_30m" not in df.columns:
+    raise ValueError("Label end timestamps are required to audit and purge split boundaries")
+if "future_timestamp_30m" in df.columns:
+    train["future_timestamp_30m"] = pd.to_datetime(train["future_timestamp_30m"])
+    valid["future_timestamp_30m"] = pd.to_datetime(valid["future_timestamp_30m"])
+    train = train.loc[train["future_timestamp_30m"] + pd.Timedelta(minutes=5) < train_boundary].copy()
+    valid = valid.loc[valid["future_timestamp_30m"] + pd.Timedelta(minutes=5) < valid_boundary].copy()
+print(f"Purged train rows with labels crossing validation boundary: {train_before_purge - len(train)}")
+print(f"Purged validation rows with labels crossing test boundary: {valid_before_purge - len(valid)}")
+
 
 # ============================================================
 # SAFETY CHECK
 # ============================================================
 
-assert len(train) + len(valid) + len(test) == len(df)
+purged_rows = train_before_purge + valid_before_purge - len(train) - len(valid)
+assert len(train) + len(valid) + len(test) + purged_rows == len(df)
 
 assert train["timestamp"].max() < valid["timestamp"].min()
 assert valid["timestamp"].max() < test["timestamp"].min()

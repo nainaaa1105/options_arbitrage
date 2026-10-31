@@ -1,308 +1,198 @@
-# Nifty 50 Options Arbitrage & Machine Learning Convergence Engine
+# NIFTY Options Research Platform
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Framework](https://img.shields.io/badge/ML-XGBoost%20%7C%20LightGBM%20%7C%20Optuna-orange.svg)](https://xgboost.readthedocs.io/)
-[![Status](https://img.shields.io/badge/Production%20Accuracy-93.45%25-brightgreen.svg)]()
+Pricing, convergence prediction, hedging experiments and a frozen forward-validation protocol for NIFTY index options,
+built on Upstox market data. **Research system: no profitable trading edge is claimed, and no orders are ever placed.**
 
-A quantitative research and production-grade trading system designed to identify intraday statistical mispricings and Put-Call Parity arbitrage opportunities across **NSE Nifty 50 Index Options**, predicting high-conviction 30-minute fair-value convergence using machine learning.
+## At a glance
 
----
+| | |
+|---|---|
+| Data | 941,949 five-minute option candles, 60 weekly expiries, 283 sessions, plus spot, futures and India VIX |
+| Prediction | 72.7% accuracy on later data vs 64.5% for always guessing the common outcome (AUC 0.788). A 93-94% target was investigated and ruled out: about a third of labels sit within half an index point of the cut-off, so tick-level noise caps the score ([report](docs/ACCURACY_V2_REPORT.md)) |
+| Entry selection | Classifier picks converge 67.1% of the time vs 47.5% for random picks among the same candidates, but this does not become a detectable profit after costs ([Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md)) |
+| Hedging | Delta hedging cuts worst-case loss by more than half but fees exceed the gain; a GRU policy is no better than an MLP ([Phase 6](docs/RESEARCH_PHASE_6.md)) |
+| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 284 offline tests with the network blocked |
+| Evidence integrity | Hash-chained validation protocol, independent ledger reconciliation, tamper detection ([Phase 9](docs/PHASE9_FORWARD_VALIDATION.md)) |
+| Forward test | Protocol drafted, **not yet frozen**; needs about 60 trading days of real quotes. Until then every number here is retrospective |
 
-## Table of Contents
-- [Executive Overview](#executive-overview)
-- [System Architecture](#system-architecture)
-- [Quantitative & Microstructure Methodology](#quantitative--microstructure-methodology)
-- [Repository Structure](#repository-structure)
-- [Installation & Setup](#installation--setup)
-- [End-to-End Pipeline Execution](#end-to-end-pipeline-execution)
-- [Model Evaluation & Accuracy Metrics](#model-evaluation--accuracy-metrics)
-- [Backtest & Quantitative Risk Performance](#backtest--quantitative-risk-performance)
-- [Production Inference Guide](#production-inference-guide)
-- [CLI Utilities](#cli-utilities)
+Small result tables and figures are in [docs/results/](docs/results). Large data, models and run folders are not in git.
 
----
-
-## Executive Overview
-
-Options prices in high-liquidity index derivatives frequently experience transient microstructural dislocations from theoretical equilibrium due to order imbalances, inventory pressure, and rapid underlying spot moves.
-
-This system provides an institutional-grade solution to capitalize on these dislocations:
-1. **Automated Market Data Ingestion**: Pulls 5-minute option candles across ATM $\pm 10$ strikes and 1-minute Nifty 50 underlying spot data via Upstox API v2.
-2. **Microstructure & Quantitative Analytics**: Calculates continuous Black-Scholes Greeks ($\Delta, \Gamma, \mathcal{V}, \Theta$), inverted Implied Volatility surfaces (Brent-Wegstein numerical inversion), Put-Call Parity deviations, and historical volatility term structures.
-3. **Leak-Free Machine Learning**: Trains Bayesian-tuned gradient-boosted models (XGBoost, LightGBM, and Ensembles) using 109 causal domain features to forecast whether a pricing dislocation will converge within 30 minutes.
-4. **Selective Conviction Engine**: Filters out ambiguous predictions via a calibrated confidence band ($\pm 0.23$), achieving **93.45% empirical system accuracy** on active traded signals.
-5. **Realistic Backtesting Engine**: Executes chronological trades with comprehensive fee accounting (STT, exchange turnover fees, GST, SEBI charges, flat brokerage, and slippage).
-
----
-
-## System Architecture
-
-```mermaid
-flowchart TD
-    subgraph Data_Ingestion ["1. Market Data Ingestion"]
-        A[Upstox API v2] -->|5m Option Candles| B[Raw Expiry Parquet Files]
-        A -->|1m Spot Candles| B
-        B --> C[Master Dataset Builder: master_build.py]
-    end
-
-    subgraph Feature_Engineering ["2. Quantitative Feature Pipeline"]
-        C --> D[Black-Scholes & IV Inversion: black_scholes.py]
-        D --> E[Greeks & Term Structure: greeks.py, build_volatility_features.py]
-        E --> F[Put-Call Parity & Residuals: build_parity_features.py]
-        F --> G[Reference IV & Price Deviations: build_deviation_features.py]
-        G --> H[Convergence Target Labels: build_convergence_labels.py]
-        H --> I[ML Dataset: ml_dataset.parquet]
-    end
-
-    subgraph Modeling ["3. Model Training & Conviction Engine"]
-        I --> J[Chronological Split: prepare_ml_split.py]
-        J --> K[Optuna Bayesian Tuning: train_models.py]
-        K --> L[Trained XGBoost & LightGBM Models]
-        L --> M[Selective Prediction Engine: arbitrage_classifier.py]
-    end
-
-    subgraph Execution ["4. Signals, Backtesting & Risk"]
-        M --> N[Trading Signals: generate_signals.py]
-        N --> O[Actionable Signals: generate_trade_signals.py]
-        O --> P[Chronological Backtester: backtest.py]
-        P --> Q[Risk & Drawdown Engine: risk_analysis.py]
-    end
+### Repository layout
+```text
+src/            pipeline, hedging research, paper trading and validation code (module map: src/README.md)
+tests/          284 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
+tools/          offline test runner, clean-install check, scheduler scripts, demo scripts
+docs/           reports, runbook and results index (docs/README.md); docs/results/ holds small evidence tables
+requirements/   optional dependency sets (PyTorch CPU, reporting, CatBoost); base list is requirements.txt
+data/           local only: raw candles, features, models and run folders (not committed)
 ```
 
----
-
-## Quantitative & Microstructure Methodology
-
-### 1. Black-Scholes Implied Volatility Solver
-Implied Volatility ($\sigma_{IV}$) is inverted numerically per option candle using bounded root-finding algorithms (Brent's method) bounded in $\sigma \in [10^{-6}, 5.0]$:
-$$C_{BS}(S, K, T, r, \sigma) - C_{market} = 0$$
-
-### 2. Put-Call Parity Residuals
-For European index options, fair pricing adheres to:
-$$C - P = S - K e^{-rT}$$
-The parity residual $\epsilon_{parity} = (C - P) - (S - K e^{-rT})$ detects synthetic arbitrage opportunities between call and put pairs at identical strikes and expiries.
-
-### 3. Convergence Target Formulation
-A trade dislocation is defined to have successfully converged within 30 minutes ($t+6$ candles) if the absolute reference price deviation reduces by at least 50% without adverse expansion beyond 1.5x initial stop-loss:
-$$\text{Converged}_{30m} = \mathbb{I}\left( |\Delta P_{t+30m}| \le 0.50 \cdot |\Delta P_t| \right)$$
-
----
-
-## Repository Structure
-
-```
-options_arbitrage/
-├── data/
-│   ├── raw/
-│   │   └── upstox/                  # Raw historical candle downloads per expiry
-│   └── processed/
-│       ├── ml_splits/               # Train, validation, test chronological splits
-│       │   ├── train.parquet
-│       │   ├── validation.parquet
-│       │   └── test.parquet
-│       ├── models/                  # Production models & calibration artifacts
-│       │   ├── best_model_xgboost.joblib
-│       │   ├── best_model_lightgbm.joblib
-│       │   ├── best_model_feature_columns.joblib
-│       │   ├── best_model_imputer_medians.joblib
-│       │   ├── best_model_test_metrics.csv
-│       │   └── best_model_confidence_accuracy.csv
-│       ├── master_options.parquet
-│       ├── ml_dataset.parquet
-│       ├── trade_signals.parquet
-│       ├── backtest_trades.parquet
-│       ├── backtest_summary.csv
-│       ├── equity_curve.csv
-│       └── risk_metrics.csv
-├── src/
-│   ├── config.py                    # Global paths, API configs, parameters
-│   ├── auth.py                      # Upstox OAuth2 authentication
-│   ├── upstox_api.py                # Upstox REST client wrapper
-│   ├── black_scholes.py             # BS pricing analytical engine
-│   ├── implied_volatility.py        # Numerical IV inversion solver
-│   ├── greeks.py                    # Delta, Gamma, Vega, Theta computation
-│   ├── time_to_expiry.py            # Precise market-hours TTE calculation
-│   ├── collect_options.py           # Historical contract candle collector
-│   ├── master_build.py              # Raw data deduplication & aggregation
-│   ├── build_features.py            # Base financial features
-│   ├── build_volatility_features.py # Historical vs Implied volatility metrics
-│   ├── build_parity_features.py     # Put-Call Parity deviation engine
-│   ├── build_deviation_features.py  # Fair theoretical price deviations
-│   ├── build_convergence_labels.py  # Ground truth convergence labels
-│   ├── build_ml_dataset.py          # Unified ML dataset builder
-│   ├── prepare_ml_split.py          # Leak-free temporal data splitter
-│   ├── train_models.py              # Bayesian Optuna tuning & ML training
-│   ├── arbitrage_classifier.py      # Production high-accuracy classifier (>=93%)
-│   ├── generate_signals.py          # Probabilistic signal generation
-│   ├── generate_trade_signals.py    # BUY/SELL/HOLD actionable signals
-│   ├── backtest.py                  # Chronological backtest execution engine
-│   ├── risk_analysis.py             # Quantitative risk & drawdown analysis
-│   └── show_eval_metrics.py         # Terminal metrics reporting dashboard
-├── tests/                           # Unit tests and API validation scripts
-├── requirements.txt                 # Project dependencies
-└── README.md
-```
-
----
-
-## Installation & Setup
-
-### 1. Clone & Set Up Virtual Environment
+### Run the tests (no API token needed; a few tests that need locally generated research artifacts skip or report visibly on a fresh clone)
 ```powershell
-git clone https://github.com/nainaaa1105/options_arbitrage.git
-cd options_arbitrage
-
-# Create and activate virtual environment
-python -m venv .venv
-.venv\Scripts\activate
+python -m venv .venv; .\.venv\Scripts\pip install -r requirements.txt
+$env:PYTHONPATH="src"; .\.venv\Scripts\python.exe tools\run_offline_tests.py     # sockets blocked, empty token
 ```
-
-### 2. Install Dependencies
-```powershell
-pip install -r requirements.txt
-```
-
-### 3. Configure API Credentials
-Create a `.env` file in the project root:
-```ini
-UPSTOX_ACCESS_TOKEN="your_upstox_access_token_here"
-```
+Paper-trading replay and live operation need a stored dataset or an Upstox token; see [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) and
+[RUNBOOK_PAPER_OPERATIONS.md](docs/RUNBOOK_PAPER_OPERATIONS.md). Copy `.env.example` to `.env` for live data.
 
 ---
 
-## End-to-End Pipeline Execution
+## Original pipeline notes
 
-Follow these steps to run the complete research and trading lifecycle:
+This repository is a historical research pipeline for NIFTY index options. It builds point-in-time pricing and volatility features, labels 30- and 60-minute deviation convergence, trains a 30-minute classifier, creates candidate trades, and evaluates them using a conservative OHLC execution model.
 
-### Step 1: Ingest Raw Historical Option & Spot Data
+The [26 October 2026 re-audit](docs/ML_REAUDIT.md) identified a historical spot/option candle-close alignment problem. The subsequent [recovery investigation](docs/ACCURACY_RECOVERY_20261030.md) obtained authentic matching data and rebuilt a separate synchronized research pipeline. Older active artifacts remain preserved and must not be mixed with the corrected research models/context. The audit also documents the coverage limits of selective accuracy.
+
+It is a research project, not a live broker or order execution system. No accuracy or profitability is guaranteed.
+
+## Pipeline
+
+```text
+Upstox expiry candles + NIFTY spot
+  -> raw expiry Parquet files
+  -> master_options.parquet
+  -> options_features.parquet
+  -> options_volatility_features.parquet
+  -> options_reference_iv.parquet
+  -> options_deviation_features.parquet
+  -> options_signal_eligible.parquet
+  -> options_parity_features.parquet
+  -> options_convergence_labels.parquet
+  -> ml_dataset.parquet + chronological splits
+  -> validation-tuned models + test evaluation
+  -> prediction candidates -> next-bar backtest -> daily risk report
+```
+
+## Setup
+
+Accuracy programme v2 (new causal features, model search, single frozen evaluation; 93-94% not attainable) is in
+[ACCURACY_V2_REPORT.md](docs/ACCURACY_V2_REPORT.md).
+
+Phases 6, 8, 0b and 9 (GRU/ablations/ensembles, ML-selected-entry handoff, operational hardening, forward-validation
+infrastructure) are documented in [IMPLEMENTATION_LOG_PHASES_6_9.md](docs/IMPLEMENTATION_LOG_PHASES_6_9.md),
+[OPERATIONS_PHASE_0B.md](docs/OPERATIONS_PHASE_0B.md) and [PHASE9_FORWARD_VALIDATION.md](docs/PHASE9_FORWARD_VALIDATION.md).
+Phase 9 forward validation is **pending** genuine new market observations.
+
+The continuous research extension through phases 0a–3 is documented in
+[CONTINUOUS_HEDGING_PHASES_0_3.md](docs/CONTINUOUS_HEDGING_PHASES_0_3.md).
+It is separate from the preserved executable whole-lot experiments.
+`research_runs.json` identifies the canonical corrected research locations;
+`research_registry.py` freezes/verifies their hashes before inference.
+Legacy `data/processed` training/signal CLIs now require explicit
+`--allow-legacy-artifacts`; custom legacy-format models require matching context.
+
+Part 4 adds an offline results dashboard and persistent quote-based paper
+execution: see [PART4_DASHBOARD_AND_PAPER_TRADING.md](docs/PART4_DASHBOARD_AND_PAPER_TRADING.md).
+Frozen protocols, depth/latency checks, restart-safe ledgers and monitoring are
+implemented. Synthetic smoke runs are labelled; genuine forward validation is pending.
+
+Part 3 historical ML-assisted hedging is implemented: see
+[PART3_HISTORICAL_ML_HEDGING.md](docs/PART3_HISTORICAL_ML_HEDGING.md) for expanding-window
+classifier inputs, matched ML/no-ML policy adaptation, common-position historical
+comparisons, costs, risk metrics and replay. These are retrospective research
+results; incremental ML benefit and deployment quality must be measured separately.
+
+Part 2 is implemented and trained: see [PART2_DEEP_HEDGING.md](docs/PART2_DEEP_HEDGING.md)
+for the CPU PyTorch policy, GBM/Heston simulation, CVaR objective and independent
+test results. The neural policies reduce risk versus unhedged positions but do
+not beat the strong delta baselines in the primary simulation tests.
+
+Part 1 hedging foundation is implemented: see
+[PART1_HEDGING_FOUNDATION.md](docs/PART1_HEDGING_FOUNDATION.md) for futures collection,
+the self-financing ledger, four conventional baselines, tests and historical
+results. Part 3 adds the historical ML-assisted hedging and delta comparison.
+
+Latest investigation: [ACCURACY_RECOVERY_20261030.md](docs/ACCURACY_RECOVERY_20261030.md).
+The authenticated API connection now works with verified system trust, missing
+expiries have been backfilled, and a separate synchronized 941,949-row research
+pipeline has been rebuilt. Use the model and feature context from the same run;
+the old active weights are preserved and are not interchangeable with new fits.
+
+Use Python 3.10 or later and install the packages in `requirements.txt` into the project environment. Set `UPSTOX_ACCESS_TOKEN` in `.env` before collection. Offline feature building, research and configuration imports do not require an API token; authenticated requests do.
+
+Read [DATA_MODEL_REMEDIATION_REPORT.md](docs/DATA_MODEL_REMEDIATION_REPORT.md) before rebuilding the data. It documents the candle alignment error, safe staged repair, coverage audit, target experiments and provisional validation results. Authentic matching five-minute spot candles or correctly offset one-minute spot candles can repair alignment. Research candidates remain separate from the active model.
+
+## Reproduce the pipeline
+
+Run each command from the repository root. Collection can be skipped when raw expiry files already exist. `collect_all.py` supports `--run-mode`, expiry bounds, session count and `--plan-only`, and preserves expiry files already present. The commands below describe the standard pipeline; follow the staged repair instructions in the remediation report for the currently misaligned historical data.
+
 ```powershell
-python src/collect_options.py
+python src/collect_all.py
 python src/master_build.py
-```
-
-### Step 2: Build Quantitative Features & Target Labels
-```powershell
 python src/build_features.py
 python src/build_volatility_features.py
-python src/build_parity_features.py
+python src/build_reference_iv.py
 python src/build_deviation_features.py
+python src/build_signal_eligibility.py
+python src/build_parity_features.py
 python src/build_convergence_labels.py
 python src/build_ml_dataset.py
-```
-
-### Step 3: Chronological Train / Val / Test Partition
-```powershell
 python src/prepare_ml_split.py
-```
-
-### Step 4: Train & Tune ML Models
-```powershell
-python src/train_models.py
-```
-
-### Step 5: Generate Signals & Execute Backtest
-```powershell
-python src/generate_signals.py --confidence-margin 0.20
-python src/generate_trade_signals.py --confidence-threshold 0.20
+python src/walk_forward_benchmark.py
+python src/train_models.py --allow-legacy-artifacts
+python src/generate_signals.py --allow-legacy-artifacts
+python src/generate_trade_signals.py --allow-legacy-artifacts
 python src/backtest.py
 python src/risk_analysis.py
-```
-
-### Step 6: View Performance & Evaluation Dashboard
-```powershell
 python src/show_eval_metrics.py
 ```
 
----
-
-## Model Evaluation & Accuracy Metrics
-
-### 1. Base Unconstrained Held-Out Test Set ($N = 11,159$ options, Threshold = 0.50)
-
-| Model | Accuracy | Precision | Recall | F1-Score | ROC-AUC | PR-AUC | Balanced Acc | Brier Loss |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Optuna XGBoost** | **72.66%** | **45.57%** | 52.96% | **0.4899** | **0.7603** | 0.4795 | **66.06%** | 0.1699 |
-| **Optuna LightGBM** | 72.36% | 45.09% | 52.78% | 0.4863 | 0.7594 | 0.4809 | 65.80% | **0.1697** |
-| **Ensemble (55/45)** | 72.61% | 45.50% | **53.00%** | 0.4896 | **0.7604** | **0.4815** | 66.04% | **0.1697** |
-
-### 2. Selective Conviction Engine (Filtering Borderline Noise)
-
-By setting a conviction margin around 0.50, low-conviction signals are rejected, allowing system accuracy to scale reliably above 90%:
-
-| Margin | Probability Bands | Test Coverage | **System Accuracy** | Long Entry Win Rate ($P \ge hi$) | Long Count |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| $\pm 0.00$ | $[0, 0.50] \cup [0.50, 1]$ | 100.0% | **72.66%** | 45.57% | 3,215 |
-| $\pm 0.10$ | $[0, 0.40] \cup [0.60, 1]$ | 64.6% | **81.95%** | 53.89% | 1,323 |
-| $\pm 0.15$ | $[0, 0.35] \cup [0.65, 1]$ | 49.6% | **87.77%** | 63.59% | 629 |
-| $\pm 0.20$ | $[0, 0.30] \cup [0.70, 1]$ | 38.5% | **91.81%** | 64.22% | 204 |
-| **$\pm 0.23$** | **$[0, 0.27] \cup [0.73, 1]$** | **34.9%** | **93.45%** | **70.48%** | **105** |
-| $\pm 0.25$ | $[0, 0.25] \cup [0.75, 1]$ | 32.0% | **94.70%** | 73.91% | 46 |
-| $\pm 0.30$ | $[0, 0.20] \cup [0.80, 1]$ | 27.8% | **96.91%** | **100.00%** | 4 |
-
----
-
-## Backtest & Quantitative Risk Performance
-
-Executed across historical out-of-sample test contracts with realistic friction (₹20/order brokerage, 0.0625% STT, exchange/SEBI turnover fees, and 0.15 pts slippage):
-
-| Metric Category | Metric Name | Value |
-| :--- | :--- | :--- |
-| **Returns** | Initial Allocated Capital | ₹250,000.00 |
-| | Total Gross P&L | +₹4,735.90 |
-| | Total Friction (Costs + Slippage) | ₹17,276.12 |
-| | Total Net P&L | -₹12,540.22 (-5.02%) |
-| **Trade Statistics** | Total Executed Trades | 204 |
-| | Win Rate | 45.59% (93 Wins / 111 Losses) |
-| | Average Win / Average Loss | ₹849.22 / ₹824.49 |
-| | Win / Loss Payoff Ratio | 1.03 |
-| | Profit Factor (Gross / Net) | 1.06 / 0.86 |
-| | Trade Expectancy | -₹61.47 |
-| **Risk & Volatility** | Annualized Sharpe Ratio | -2.93 |
-| | Annualized Sortino Ratio | -3.38 |
-| | Annualized Volatility | 20.82% |
-| | Downside Deviation | 18.03% |
-| **Drawdowns** | Maximum Drawdown (₹ / %) | ₹23,777.19 (9.16%) |
-| | Max Drawdown Duration | 12.9 days (73 trades) |
-| | Average Drawdown Duration | 5.7 days |
-
----
-
-## Production Inference Guide
-
-You can integrate the trained models directly into live feeds or event loops using `HighAccuracyArbitrageClassifier`:
-
-```python
-import pandas as pd
-from src.arbitrage_classifier import HighAccuracyArbitrageClassifier
-
-# 1. Initialize classifier (default margin +/- 0.23 => >= 93% empirical accuracy)
-classifier = HighAccuracyArbitrageClassifier(confidence_margin=0.23)
-
-# 2. Score real-time options dataframe (must have engineered features)
-# Returns: 1 (Trade Convergence), 0 (No Trade), -1 (Abstain / Noise Band)
-predictions = classifier.predict(live_features_df, return_abstain=True)
-
-# 3. Or obtain calibrated convergence probability
-probabilities = classifier.predict_proba(live_features_df)
-```
-
----
-
-## CLI Utilities
-
-To display model metrics, confidence curves, and backtest results at any time:
+The signal generator reads the probability cutoff saved by training from validation data. Do not choose thresholds from test results. To run focused regression tests without installing `pytest`:
 
 ```powershell
-python src/show_eval_metrics.py
+.\.venv\Scripts\python.exe -m unittest tests.test_point_in_time_features tests.test_ml_evaluation_safety tests.test_backtest_accounting tests.test_risk_analysis tests.test_financial_calculations tests.test_candle_alignment tests.test_robust_model_research tests.test_convergence_labels tests.test_data_remediation -v
 ```
 
-To evaluate the classifier standalone on the test split:
-```powershell
-python src/arbitrage_classifier.py
-```
+## Quantitative assumptions
 
----
+- Historical volatility uses daily close-to-close returns through the **previous completed trading day**. The rolling windows require a full history before producing a value.
+- Reference IV is grouped by timestamp, expiry, and option type. Each target contract is left out of its own estimate. Interior values use the nearest strike neighbors in log-moneyness; edge extrapolation is limited to 0.03 log-moneyness. Insufficient or distant estimates remain missing.
+- Pricing uses European Black–Scholes with the configured constant risk-free rate. The reference surface is a statistical benchmark; a residual is not proof of executable arbitrage.
+- The 30-minute label requires at least a 50% reduction in absolute reference-price deviation at the endpoint. The future candle can be up to five minutes after the nominal horizon. This is not an any-time/first-passage convergence label. The 60-minute endpoint label is retained for analysis; the current classifier target is 30 minutes.
+- Splits are chronological by whole trading date. Label end timestamps are carried into the split audit, and samples that cross a split boundary are purged. Preprocessing pipelines fit their imputers and scalers on training data only.
+- Model families are Logistic Regression, Random Forest, XGBoost, and LightGBM. Optuna searches a small configured trial budget (`OPTUNA_TRIALS` in `src/train_models.py`) against validation PR-AUC within each family. The family is selected by validation ROC-AUC (accuracy tie-break), and the operating threshold is selected by validation accuracy. The selected model is scored on the later test split only for diagnostics. Because this test period has been reviewed across multiple project iterations, it is no longer a pristine final holdout; use newly collected later dates for confirmatory performance claims.
+- `walk_forward_benchmark.py` compares a predeclared set of regularized models using three expanding, date-based folds inside the training period. It purges training labels crossing each fold boundary, uses only point-in-time lags and full-surface context features, and writes an experimental model separately from `best_model.joblib`. Its terminal validation score is a historical diagnostic; after prior iterations, only newly collected later dates can serve as a pristine final holdout.
+- Classification accuracy, selective predictions, convergence precision, trade win rate, and net profitability are different measures. The evaluation reports a fixed 0.50 reference cutoff, predeclared 0.55/0.60 cutoffs, validation-selected accuracy/F1/balanced-accuracy cutoffs, and an always-negative baseline. Every test row is an evaluation of a cutoff chosen in advance or from validation; test metrics must not be used to retune the model. See `best_model_test_operating_points.csv`.
 
-## License
-MIT License. Built for quantitative research and educational exploration of index derivatives microstructure.
+## Execution and cost assumptions
+
+The data has 5-minute OHLC candles, not bid/ask quotes or order-book depth. A signal is formed after its candle and enters at the next contract candle's open. Exit uses the first candle open at or after the requested holding horizon. Missing entry or exit bars are skipped and counted; no flat-price fallback is invented.
+
+The backtest applies configurable half-spread and slippage assumptions per leg, brokerage per order, exchange premium-turnover charges, SEBI turnover fees, buyer-side stamp duty, GST on brokerage and exchange/SEBI fees, and date-dependent STT. Defaults are documented in `src/backtest.py`; update them for the relevant broker, historical date, and contract note. Exchange schedules and statutory rates can change.
+
+Long positions are constrained by premium-funded capital, a capital fraction, maximum concurrent positions, and maximum lots. Short-option trades are skipped by default because this data set has no historical SPAN margin series. They can only be enabled by explicitly supplying a conservative `--short-margin-per-lot` proxy; that proxy is not an official margin calculation.
+
+Risk returns use realized daily P&L divided by prior-day equity and include zero-trade dates from the market calendar. Sharpe and Sortino are annualized from daily returns using 252 sessions and the configured risk-free rate.
+
+## Outputs
+
+Processed files are written under `data/processed/`. Before the correction rebuild, the prior processed data, models, predictions, and reports were copied to `data/backup_pre_corrections_20261026/`. Raw files in `data/raw/` are left unchanged.
+
+The terminal reporting script reads saved model metrics and risk outputs; it does not provide an interactive dashboard. No broker connection or live order placement is implemented.
+
+## Known limitations
+
+- Upstox historical candles do not provide bid/ask execution prices or historical margin requirements.
+- Black–Scholes uses a constant configured rate and does not model discrete dividends, volatility jumps, or market impact.
+- Backtest fills at candle opens are a transparent approximation; queue priority, partial fills, latency, and market impact are unavailable.
+- Hyperparameter search is intentionally small for reproducibility and runtime. Results should be repeated across additional chronological periods before drawing strategy conclusions.
+- Some legacy modules and API smoke scripts remain in the repository; not every file is part of the active pipeline.
+
+## Continuous deep-hedging research extensions
+
+The isolated continuous short-option research track now includes the Phase 4
+cost-grid minimum viable project, Phase 7 whole-lot rounding bridge and Phase 5
+robustness experiments. See [RESEARCH_PHASES_4_7_5.md](RESEARCH_PHASES_4_7_5.md)
+for the experiment contracts, actual results, corrections, deliverables and
+reproduction commands. Canonical directories are recorded in `research_runs.json`.
+
+- [Minimum viable project report](data/research/phase4_cost_grid_20261031/report/MVP_RESEARCH_REPORT.md)
+- [Whole-lot bridge report](data/research/research_extension_delivery_20261031/phase7/report/ROUNDING_REPORT.md)
+- [Robustness report](data/research/research_extension_delivery_20261031/phase5_corrected/report_final/ROBUSTNESS_REPORT.md)
+
+These reports use synthetic paths and explicit normalized costs. Lower hedge
+tail loss is distinct from classification accuracy or trading profit. Frozen
+models, as-run source snapshots, common test-path banks, all-seed comparisons,
+paired conditional intervals, accounting replays and static PNG/PDF figures
+remain available. These runs do not promote a production model or establish
+prospective real-market performance.

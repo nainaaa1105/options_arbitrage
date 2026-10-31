@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "purpose": "Explicit research locations; no production model promotion",
+  "corrected_classifier_stage": "data/research/expanded_20261030",
+  "historical_hedging": "data/research/historical_hedging_part3_final_20261031",
+  "existing_simulation": "data/research/deep_hedging_part2_final_20261031",
+  "continuous_phase1_3": "data/research/continuous_phases1_3_projected_20261031",
+  "continuous_phase4": "data/research/phase4_cost_grid_20261031",
+  "rounding_phase7": "data/research/research_extension_delivery_20261031/phase7",
+  "robustness_phase5": "data/research/research_extension_delivery_20261031/phase5_corrected",
+  "legacy_route": "data/processed",
+  "legacy_requires_cli_opt_in": true
+}

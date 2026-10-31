@@ -1,0 +1,43 @@
+{
+  "rows_evaluated": 54002,
+  "chosen": "stack_logistic",
+  "label_boundary": {
+    "within_0.05_points": 0.03033220991815118,
+    "within_0.1_points": 0.05999777786007925,
+    "within_0.25_points": 0.15025369430761823,
+    "within_0.5_points": 0.31709936669012256,
+    "note": "Share of labels whose future deviation lies within w index-option points of the 50%-reduction cutoff (tick = 0.05)"
+  },
+  "fold_auc_vs_training_rows": [
+    {
+      "candidate": "baseline_frozen",
+      "fold": 1,
+      "train_rows": 17734.0,
+      "auc": 0.7528601938497922
+    },
+    {
+      "candidate": "baseline_frozen",
+      "fold": 2,
+      "train_rows": 32558.0,
+      "auc": 0.78973396928134
+    },
+    {
+      "candidate": "baseline_frozen",
+      "fold": 3,
+      "train_rows": 52952.0,
+      "auc": 0.743403117735548
+    },
+    {
+      "candidate": "baseline_frozen",
+      "fold": 4,
+      "train_rows": 75860.0,
+      "auc": 0.7424473856045942
+    },
+    {
+      "candidate": "baseline_frozen",
+      "fold": 5,
+      "train_rows": 91705.0,
+      "auc": 0.781573843897243
+    }
+  ]
+}

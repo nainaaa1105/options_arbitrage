@@ -2,7 +2,19 @@
 __pycache__/
 *.pyc
 .env
-data/raw/
-data/processed/
+.env.*
+!.env.example
+
+# Market data, models and run artifacts are large and regenerated locally; small evidence lives in docs/results/
+data/
+*.parquet
+*.joblib
+*.sqlite
+*.pt
+*.npz
+
 .ipynb_checkpoints/
 .vscode/
+.matplotlib_cache/
+
+catboost_info/

@@ -6,9 +6,8 @@ trade decisions: BUY, SELL, HOLD.
 
 Rules:
 ------
-- Only generate BUY/SELL when:
-    1. Model confidence >= 0.20 (P >= 0.70 for convergence)
-    2. Pricing deviation supports the trade direction:
+- Only generate BUY/SELL when the saved validation-selected convergence cutoff is met
+  and the contemporaneous pricing deviation supports the trade direction:
        - Undervalued (market_price < theoretical_price or price_deviation < 0) -> BUY
        - Overvalued  (market_price > theoretical_price or price_deviation > 0) -> SELL
 - Otherwise -> HOLD
@@ -21,6 +20,7 @@ import argparse
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from research_targets import session_horizon_eligible
 
 
 # ============================================================
@@ -30,13 +30,13 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT_FILE  = PROJECT_ROOT / "data" / "processed" / "trading_signals.parquet"
 DEFAULT_OUTPUT_FILE = PROJECT_ROOT / "data" / "processed" / "trade_signals.parquet"
-DEFAULT_CONF_THRESHOLD = 0.20
+DEFAULT_CONF_THRESHOLD = None
 
 
 def generate_actionable_trade_signals(
     input_path: Path = DEFAULT_INPUT_FILE,
     output_path: Path = DEFAULT_OUTPUT_FILE,
-    confidence_threshold: float = DEFAULT_CONF_THRESHOLD,
+    confidence_threshold: float | None = DEFAULT_CONF_THRESHOLD,
     min_abs_deviation: float = 0.0
 ) -> pd.DataFrame:
     """
@@ -46,7 +46,7 @@ def generate_actionable_trade_signals(
     print("GENERATING ACTIONABLE OPTIONS TRADE SIGNALS (BUY / SELL / HOLD)")
     print("=" * 80)
     print(f"Input file:           {input_path}")
-    print(f"Confidence threshold: {confidence_threshold:.2f} (Required P >= {0.50 + confidence_threshold:.2f})")
+    print(f"Confidence threshold override: {confidence_threshold}")
     print(f"Output destination:   {output_path}")
 
     if not input_path.exists():
@@ -75,11 +75,25 @@ def generate_actionable_trade_signals(
     dev  = df["price_deviation"]
     conf = df["confidence"]
 
-    # Convergence threshold (P >= 0.50 + confidence_threshold)
-    min_prob_convergence = 0.50 + confidence_threshold
+    # By default use the validation-selected cutoff carried with the signal.
+    # An explicit CLI/function threshold remains available for controlled studies.
+    if confidence_threshold is None:
+        if "probability_threshold" in df:
+            min_prob_convergence = pd.to_numeric(
+                df["probability_threshold"], errors="coerce"
+            )
+        else:
+            min_prob_convergence = pd.Series(0.5, index=df.index)
+    else:
+        min_prob_convergence = 0.50 + float(confidence_threshold)
 
     # Conditions for Actionable Signals
-    is_confident_convergence = (conf >= confidence_threshold) & (prob >= min_prob_convergence)
+    is_confident_convergence = prob >= min_prob_convergence
+    if "horizon_eligible" in df:
+        is_confident_convergence &= df["horizon_eligible"].fillna(False).astype(bool)
+    if "timestamp" in df:
+        is_confident_convergence &= session_horizon_eligible(df["timestamp"], horizon_minutes=30)
+    is_confident_convergence &= np.isfinite(prob) & prob.between(0, 1)
     is_valid_deviation       = dev.abs() >= min_abs_deviation
 
     is_buy  = is_confident_convergence & is_valid_deviation & (dev < 0)  # Undervalued -> BUY
@@ -94,14 +108,16 @@ def generate_actionable_trade_signals(
 
     df["trade_signal"]   = trade_signals
     df["is_actionable"]   = df["trade_signal"].isin(["BUY", "SELL"])
-    df["trade_rationale"] = np.where(
-        is_buy,
-        f"Undervalued (Market < Fair) & High Conv. Prob (P={prob.round(3)})",
-        np.where(
-            is_sell,
-            f"Overvalued (Market > Fair) & High Conv. Prob (P={prob.round(3)})",
-            "Insufficient Confidence / Non-Converging"
-        )
+    probability_text = pd.to_numeric(prob, errors="coerce").map(
+        lambda value: f"{value:.3f}" if np.isfinite(value) else "NA"
+    )
+    df["trade_rationale"] = np.select(
+        [is_buy, is_sell],
+        [
+            "Undervalued (Market < Fair); convergence probability P=" + probability_text,
+            "Overvalued (Market > Fair); convergence probability P=" + probability_text,
+        ],
+        default="Below validation-selected cutoff or invalid deviation",
     )
 
     # Save to parquet
@@ -151,6 +167,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate actionable BUY / SELL / HOLD signals from options arbitrage predictions."
     )
+    parser.add_argument('--allow-legacy-artifacts', action='store_true')
     parser.add_argument(
         "--input-file",
         type=str,
@@ -167,7 +184,7 @@ def main():
         "--confidence-threshold",
         type=float,
         default=DEFAULT_CONF_THRESHOLD,
-        help=f"Minimum confidence margin (default: {DEFAULT_CONF_THRESHOLD:.2f})."
+        help="Optional probability margin above 0.50; default uses validation-selected row threshold."
     )
     parser.add_argument(
         "--min-abs-deviation",
@@ -176,6 +193,8 @@ def main():
         help="Minimum absolute price deviation required to trade (default: 0.0)."
     )
     args = parser.parse_args()
+    if Path(args.input_file).resolve() == DEFAULT_INPUT_FILE.resolve() and not args.allow_legacy_artifacts:
+        parser.error('Default input is preserved legacy output. Supply an explicit --input-file or intentionally opt into --allow-legacy-artifacts.')
 
     generate_actionable_trade_signals(
         input_path=Path(args.input_file),

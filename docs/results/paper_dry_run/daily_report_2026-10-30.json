@@ -1,0 +1,288 @@
+{
+  "day": "2026-10-30",
+  "generated_utc": "2026-10-31T16:00:49.301050+00:00",
+  "sessions": [
+    {
+      "contract": "ATM_CE",
+      "strategy": "adapted_no_ml",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4982333.4426621515,
+      "fees": 14832.557337850005,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_CE",
+      "strategy": "band_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4978687.2232076395,
+      "fees": 14760.776792362003,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_CE",
+      "strategy": "dynamic_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4978687.2232076395,
+      "fees": 14760.776792362003,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_CE",
+      "strategy": "static_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4978687.2232076395,
+      "fees": 14760.776792362003,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_CE",
+      "strategy": "unhedged",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4998464.104495913,
+      "fees": 898.8955040860001,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_PE",
+      "strategy": "adapted_no_ml",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4986042.2848115815,
+      "fees": 10324.215188416998,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_PE",
+      "strategy": "band_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990211.072694268,
+      "fees": 8579.927305732,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_PE",
+      "strategy": "dynamic_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4985254.671732876,
+      "fees": 12138.828267123,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_PE",
+      "strategy": "static_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990211.072694268,
+      "fees": 8579.927305732,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "ATM_PE",
+      "strategy": "unhedged",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4989263.276417394,
+      "fees": 661.7235826060002,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_CE",
+      "strategy": "adapted_no_ml",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4987288.634724141,
+      "fees": 10156.865275859003,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_CE",
+      "strategy": "band_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4985756.821143052,
+      "fees": 9309.678856949002,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_CE",
+      "strategy": "dynamic_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4985521.788478554,
+      "fees": 10253.211521446003,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_CE",
+      "strategy": "static_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4985756.821143052,
+      "fees": 9309.678856949002,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_CE",
+      "strategy": "unhedged",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4997681.153682021,
+      "fees": 537.846317978,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_PE",
+      "strategy": "adapted_no_ml",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990723.24925224,
+      "fees": 5799.250747761001,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_PE",
+      "strategy": "band_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990723.24925224,
+      "fees": 5799.250747761001,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_PE",
+      "strategy": "dynamic_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990723.24925224,
+      "fees": 5799.250747761001,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_PE",
+      "strategy": "static_delta",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4990723.24925224,
+      "fees": 5799.250747761001,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    },
+    {
+      "contract": "OTM_PE",
+      "strategy": "unhedged",
+      "events": {
+        "accepted": 42
+      },
+      "open_option_units": 0,
+      "open_future_units": 0,
+      "cash": 4993647.249121545,
+      "fees": 424.750878456,
+      "reconciles": true,
+      "max_error": 0.0,
+      "alerts": []
+    }
+  ],
+  "all_reconcile": true,
+  "any_open_exposure": false
+}

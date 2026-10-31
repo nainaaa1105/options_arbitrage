@@ -1,0 +1,84 @@
+{
+  "overall": "pending",
+  "observed_forward_days": 0,
+  "required_forward_days": 60,
+  "nonconforming_sessions": [
+    "synthetic_unhedged",
+    "synthetic_dynamic_delta"
+  ],
+  "criteria": [
+    {
+      "criterion": "forward_sessions",
+      "requirement": ">= 60 observed forward trading days",
+      "observed": 0,
+      "status": "fail",
+      "hard": false
+    },
+    {
+      "criterion": "integrity_violations",
+      "requirement": "<= 0 among registered forward sessions",
+      "observed": 0,
+      "status": "pass",
+      "hard": true
+    },
+    {
+      "criterion": "ledger_reconciliation",
+      "requirement": "all sessions reconcile within 1e-06",
+      "observed": 0.0,
+      "status": "pass",
+      "hard": true
+    },
+    {
+      "criterion": "unresolved_exposure_days",
+      "requirement": "<= 0",
+      "observed": 0,
+      "status": "pass",
+      "hard": true
+    },
+    {
+      "criterion": "max_drawdown_fraction",
+      "requirement": "<= 0.1",
+      "observed": null,
+      "status": "pending",
+      "hard": true
+    },
+    {
+      "criterion": "event_coverage",
+      "requirement": ">= 0.9",
+      "observed": null,
+      "status": "pending",
+      "hard": false
+    },
+    {
+      "criterion": "event_acceptance_rate",
+      "requirement": ">= 0.9",
+      "observed": null,
+      "status": "pending",
+      "hard": false
+    },
+    {
+      "criterion": "quarantine_fraction",
+      "requirement": "<= 0.01",
+      "observed": 0.0,
+      "status": "pending",
+      "hard": false
+    },
+    {
+      "criterion": "cvar95_reduction",
+      "requirement": "paired interval excludes zero (dynamic_delta vs unhedged)",
+      "observed": {
+        "paired_episodes": 0
+      },
+      "status": "pending",
+      "hard": false
+    },
+    {
+      "criterion": "ml_incremental_pnl",
+      "requirement": "applies only if an ML strategy is registered",
+      "observed": null,
+      "status": "not_applicable",
+      "hard": false
+    }
+  ],
+  "note": "Pending means no performance conclusion is drawn; synthetic and replay sessions never count."
+}
