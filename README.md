@@ -1,5 +1,7 @@
 # NIFTY Options Research Platform
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg) ![Status: research](https://img.shields.io/badge/status-research-lightgrey.svg)
+
 Pricing, convergence prediction, hedging experiments and a frozen forward-validation protocol for NIFTY index options,
 built on Upstox market data. **Research system: no profitable trading edge is claimed, and no orders are ever placed.**
 
@@ -11,110 +13,77 @@ built on Upstox market data. **Research system: no profitable trading edge is cl
 | Prediction | 72.7% accuracy on later data vs 64.5% for always guessing the common outcome (AUC 0.788). A 93-94% target was investigated and ruled out: about a third of labels sit within half an index point of the cut-off, so tick-level noise caps the score ([report](docs/ACCURACY_V2_REPORT.md)) |
 | Entry selection | Classifier picks converge 67.1% of the time vs 47.5% for random picks among the same candidates, but this does not become a detectable profit after costs ([Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md)) |
 | Hedging | Delta hedging cuts worst-case loss by more than half but fees exceed the gain; a GRU policy is no better than an MLP ([Phase 6](docs/RESEARCH_PHASE_6.md)) |
-| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 284 offline tests with the network blocked |
+| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 290 offline tests with the network blocked |
 | Evidence integrity | Hash-chained validation protocol, independent ledger reconciliation, tamper detection ([Phase 9](docs/PHASE9_FORWARD_VALIDATION.md)) |
 | Forward test | Protocol drafted, **not yet frozen**; needs about 60 trading days of real quotes. Until then every number here is retrospective |
 
-Small result tables and figures are in [docs/results/](docs/results). Large data, models and run folders are not in git.
+Small result tables and figures that back these claims are in [docs/results/](docs/results). Large data, models and run folders are not in git.
 
-### Repository layout
+## Repository layout
+
 ```text
 src/            pipeline, hedging research, paper trading and validation code (module map: src/README.md)
-tests/          284 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
+tests/          290 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
 tools/          offline test runner, clean-install check, scheduler scripts, demo scripts
 docs/           reports, runbook and results index (docs/README.md); docs/results/ holds small evidence tables
 requirements/   optional dependency sets (PyTorch CPU, reporting, CatBoost); base list is requirements.txt
 data/           local only: raw candles, features, models and run folders (not committed)
 ```
 
-### Run the tests (no API token needed; a few tests that need locally generated research artifacts skip or report visibly on a fresh clone)
+## Quick start
+
 ```powershell
-python -m venv .venv; .\.venv\Scripts\pip install -r requirements.txt
-$env:PYTHONPATH="src"; .\.venv\Scripts\python.exe tools\run_offline_tests.py     # sockets blocked, empty token
+git clone https://github.com/nainaaa1105/options_arbitrage.git
+cd options_arbitrage
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe tools\run_offline_tests.py          # network blocked, empty token, no data needed
 ```
-Paper-trading replay and live operation need a stored dataset or an Upstox token; see [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) and
-[RUNBOOK_PAPER_OPERATIONS.md](docs/RUNBOOK_PAPER_OPERATIONS.md). Copy `.env.example` to `.env` for live data.
 
----
+On a fresh clone the tests that need locally generated market data skip themselves; everything else runs. Hedging research
+needs the optional CPU PyTorch set (`requirements/deep-hedging.txt`, installation note inside the file). Live data needs an
+Upstox token: copy `.env.example` to `.env` and fill it in. The code only reads market data.
 
-## Original pipeline notes
+A 25-second paper-trading replay (stored real candles, synthetic quotes) and a tamper-detection demo are described in
+[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md); daily operation is in [docs/RUNBOOK_PAPER_OPERATIONS.md](docs/RUNBOOK_PAPER_OPERATIONS.md).
+Both need data and an Upstox token that are not in this repository.
 
-This repository is a historical research pipeline for NIFTY index options. It builds point-in-time pricing and volatility features, labels 30- and 60-minute deviation convergence, trains a 30-minute classifier, creates candidate trades, and evaluates them using a conservative OHLC execution model.
+## Documentation
 
-The [26 October 2026 re-audit](docs/ML_REAUDIT.md) identified a historical spot/option candle-close alignment problem. The subsequent [recovery investigation](docs/ACCURACY_RECOVERY_20261030.md) obtained authentic matching data and rebuilt a separate synchronized research pipeline. Older active artifacts remain preserved and must not be mixed with the corrected research models/context. The audit also documents the coverage limits of selective accuracy.
+The full index is [docs/README.md](docs/README.md). The research tracks, in the order they were built:
 
-It is a research project, not a live broker or order execution system. No accuracy or profitability is guaranteed.
+| Track | Read |
+|---|---|
+| Data defect and rebuild (spot/option candle timing) | [ML_REAUDIT](docs/ML_REAUDIT.md), [DATA_MODEL_REMEDIATION_REPORT](docs/DATA_MODEL_REMEDIATION_REPORT.md), [ACCURACY_RECOVERY](docs/ACCURACY_RECOVERY_20261030.md) |
+| Hedging foundation, neural hedgers, ML-assisted hedging | [Part 1](docs/PART1_HEDGING_FOUNDATION.md), [Part 2](docs/PART2_DEEP_HEDGING.md), [Part 3](docs/PART3_HISTORICAL_ML_HEDGING.md) |
+| Continuous-time policies, cost grid, rounding, robustness | [Phases 0a-3](docs/CONTINUOUS_HEDGING_PHASES_0_3.md), [Phases 4/7/5](RESEARCH_PHASES_4_7_5.md), [reports with figures](docs/results/continuous_hedging) |
+| GRU, ablations, ensembles | [Phase 6](docs/RESEARCH_PHASE_6.md) |
+| ML-selected entries plus hedging | [Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md) |
+| Accuracy programme | [ACCURACY_V2_REPORT](docs/ACCURACY_V2_REPORT.md) |
+| Dashboard, paper trading, operations, forward validation | [Part 4](docs/PART4_DASHBOARD_AND_PAPER_TRADING.md), [Phase 0b](docs/OPERATIONS_PHASE_0B.md), [Phase 9](docs/PHASE9_FORWARD_VALIDATION.md) |
+| Audits and status | [System audit](docs/SYSTEM_AUDIT_20261031.md), [Status and roadmap](docs/SYSTEM_STATUS_AND_ROADMAP_20261031.md), [Implementation log](docs/IMPLEMENTATION_LOG_PHASES_6_9.md) |
+
+`research_runs.json` records the canonical corrected research run locations. Older artifacts under `data/processed` belong to the
+pre-correction pipeline and must not be mixed with the corrected models and feature context; the legacy training and signal
+commands require an explicit `--allow-legacy-artifacts`. Some dated reports (for example `RESEARCH_PHASES_4_7_5.md`) link to
+local run folders that are not committed, because their text is pinned by artifact hashes; the committed copies are under `docs/results/`.
 
 ## Pipeline
 
 ```text
 Upstox expiry candles + NIFTY spot
-  -> raw expiry Parquet files
-  -> master_options.parquet
-  -> options_features.parquet
-  -> options_volatility_features.parquet
-  -> options_reference_iv.parquet
-  -> options_deviation_features.parquet
-  -> options_signal_eligible.parquet
-  -> options_parity_features.parquet
-  -> options_convergence_labels.parquet
-  -> ml_dataset.parquet + chronological splits
-  -> validation-tuned models + test evaluation
-  -> prediction candidates -> next-bar backtest -> daily risk report
+  -> raw expiry Parquet files -> master_options.parquet
+  -> options_features (IV, Greeks)      -> options_volatility_features (historical volatility)
+  -> options_reference_iv (leave-one-out surface) -> options_deviation_features
+  -> options_signal_eligible -> options_parity_features -> options_convergence_labels
+  -> ml_dataset + chronological splits -> validation-tuned models + evaluation
+  -> candidate trades -> next-bar backtest -> daily risk report
 ```
 
-## Setup
-
-Accuracy programme v2 (new causal features, model search, single frozen evaluation; 93-94% not attainable) is in
-[ACCURACY_V2_REPORT.md](docs/ACCURACY_V2_REPORT.md).
-
-Phases 6, 8, 0b and 9 (GRU/ablations/ensembles, ML-selected-entry handoff, operational hardening, forward-validation
-infrastructure) are documented in [IMPLEMENTATION_LOG_PHASES_6_9.md](docs/IMPLEMENTATION_LOG_PHASES_6_9.md),
-[OPERATIONS_PHASE_0B.md](docs/OPERATIONS_PHASE_0B.md) and [PHASE9_FORWARD_VALIDATION.md](docs/PHASE9_FORWARD_VALIDATION.md).
-Phase 9 forward validation is **pending** genuine new market observations.
-
-The continuous research extension through phases 0a–3 is documented in
-[CONTINUOUS_HEDGING_PHASES_0_3.md](docs/CONTINUOUS_HEDGING_PHASES_0_3.md).
-It is separate from the preserved executable whole-lot experiments.
-`research_runs.json` identifies the canonical corrected research locations;
-`research_registry.py` freezes/verifies their hashes before inference.
-Legacy `data/processed` training/signal CLIs now require explicit
-`--allow-legacy-artifacts`; custom legacy-format models require matching context.
-
-Part 4 adds an offline results dashboard and persistent quote-based paper
-execution: see [PART4_DASHBOARD_AND_PAPER_TRADING.md](docs/PART4_DASHBOARD_AND_PAPER_TRADING.md).
-Frozen protocols, depth/latency checks, restart-safe ledgers and monitoring are
-implemented. Synthetic smoke runs are labelled; genuine forward validation is pending.
-
-Part 3 historical ML-assisted hedging is implemented: see
-[PART3_HISTORICAL_ML_HEDGING.md](docs/PART3_HISTORICAL_ML_HEDGING.md) for expanding-window
-classifier inputs, matched ML/no-ML policy adaptation, common-position historical
-comparisons, costs, risk metrics and replay. These are retrospective research
-results; incremental ML benefit and deployment quality must be measured separately.
-
-Part 2 is implemented and trained: see [PART2_DEEP_HEDGING.md](docs/PART2_DEEP_HEDGING.md)
-for the CPU PyTorch policy, GBM/Heston simulation, CVaR objective and independent
-test results. The neural policies reduce risk versus unhedged positions but do
-not beat the strong delta baselines in the primary simulation tests.
-
-Part 1 hedging foundation is implemented: see
-[PART1_HEDGING_FOUNDATION.md](docs/PART1_HEDGING_FOUNDATION.md) for futures collection,
-the self-financing ledger, four conventional baselines, tests and historical
-results. Part 3 adds the historical ML-assisted hedging and delta comparison.
-
-Latest investigation: [ACCURACY_RECOVERY_20261030.md](docs/ACCURACY_RECOVERY_20261030.md).
-The authenticated API connection now works with verified system trust, missing
-expiries have been backfilled, and a separate synchronized 941,949-row research
-pipeline has been rebuilt. Use the model and feature context from the same run;
-the old active weights are preserved and are not interchangeable with new fits.
-
-Use Python 3.10 or later and install the packages in `requirements.txt` into the project environment. Set `UPSTOX_ACCESS_TOKEN` in `.env` before collection. Offline feature building, research and configuration imports do not require an API token; authenticated requests do.
-
-Read [DATA_MODEL_REMEDIATION_REPORT.md](docs/DATA_MODEL_REMEDIATION_REPORT.md) before rebuilding the data. It documents the candle alignment error, safe staged repair, coverage audit, target experiments and provisional validation results. Authentic matching five-minute spot candles or correctly offset one-minute spot candles can repair alignment. Research candidates remain separate from the active model.
-
-## Reproduce the pipeline
-
-Run each command from the repository root. Collection can be skipped when raw expiry files already exist. `collect_all.py` supports `--run-mode`, expiry bounds, session count and `--plan-only`, and preserves expiry files already present. The commands below describe the standard pipeline; follow the staged repair instructions in the remediation report for the currently misaligned historical data.
+Reproducing the standard pipeline (from the repository root, with `PYTHONPATH=src`). Collection can be skipped when raw expiry
+files exist. `collect_all.py` supports `--run-mode`, expiry bounds, session count and `--plan-only`, and never overwrites existing
+raw files. Follow the staged repair in the remediation report if you rebuild from the original misaligned data.
 
 ```powershell
 python src/collect_all.py
@@ -137,22 +106,20 @@ python src/risk_analysis.py
 python src/show_eval_metrics.py
 ```
 
-The signal generator reads the probability cutoff saved by training from validation data. Do not choose thresholds from test results. To run focused regression tests without installing `pytest`:
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest tests.test_point_in_time_features tests.test_ml_evaluation_safety tests.test_backtest_accounting tests.test_risk_analysis tests.test_financial_calculations tests.test_candle_alignment tests.test_robust_model_research tests.test_convergence_labels tests.test_data_remediation -v
-```
+The signal generator reads the probability cutoff saved by training from validation data. Do not choose thresholds from test results.
+The corrected research route (isolated, hash-recorded runs) is `run_aligned_research.py`, `merge_research_components.py`,
+`evaluate_fresh_period.py` and the `accuracy_v2` package; see the reports above.
 
 ## Quantitative assumptions
 
 - Historical volatility uses daily close-to-close returns through the **previous completed trading day**. The rolling windows require a full history before producing a value.
 - Reference IV is grouped by timestamp, expiry, and option type. Each target contract is left out of its own estimate. Interior values use the nearest strike neighbors in log-moneyness; edge extrapolation is limited to 0.03 log-moneyness. Insufficient or distant estimates remain missing.
-- Pricing uses European Black–Scholes with the configured constant risk-free rate. The reference surface is a statistical benchmark; a residual is not proof of executable arbitrage.
+- Pricing uses European Black-Scholes with the configured constant risk-free rate. The reference surface is a statistical benchmark; a residual is not proof of executable arbitrage.
 - The 30-minute label requires at least a 50% reduction in absolute reference-price deviation at the endpoint. The future candle can be up to five minutes after the nominal horizon. This is not an any-time/first-passage convergence label. The 60-minute endpoint label is retained for analysis; the current classifier target is 30 minutes.
 - Splits are chronological by whole trading date. Label end timestamps are carried into the split audit, and samples that cross a split boundary are purged. Preprocessing pipelines fit their imputers and scalers on training data only.
-- Model families are Logistic Regression, Random Forest, XGBoost, and LightGBM. Optuna searches a small configured trial budget (`OPTUNA_TRIALS` in `src/train_models.py`) against validation PR-AUC within each family. The family is selected by validation ROC-AUC (accuracy tie-break), and the operating threshold is selected by validation accuracy. The selected model is scored on the later test split only for diagnostics. Because this test period has been reviewed across multiple project iterations, it is no longer a pristine final holdout; use newly collected later dates for confirmatory performance claims.
-- `walk_forward_benchmark.py` compares a predeclared set of regularized models using three expanding, date-based folds inside the training period. It purges training labels crossing each fold boundary, uses only point-in-time lags and full-surface context features, and writes an experimental model separately from `best_model.joblib`. Its terminal validation score is a historical diagnostic; after prior iterations, only newly collected later dates can serve as a pristine final holdout.
-- Classification accuracy, selective predictions, convergence precision, trade win rate, and net profitability are different measures. The evaluation reports a fixed 0.50 reference cutoff, predeclared 0.55/0.60 cutoffs, validation-selected accuracy/F1/balanced-accuracy cutoffs, and an always-negative baseline. Every test row is an evaluation of a cutoff chosen in advance or from validation; test metrics must not be used to retune the model. See `best_model_test_operating_points.csv`.
+- Model families are Logistic Regression, Random Forest, XGBoost, LightGBM (and CatBoost and ExtraTrees in the accuracy programme). Optuna searches a small configured trial budget against validation metrics within each family. The operating threshold is selected on validation data only. Because the later test period has been reviewed across several project iterations, it is no longer a pristine holdout; use newly collected later dates for confirmatory performance claims.
+- `walk_forward_benchmark.py` compares a predeclared set of regularized models using three expanding, date-based folds inside the training period, purging training labels that cross each fold boundary, and writes an experimental model separately from `best_model.joblib`.
+- Classification accuracy, selective predictions, convergence precision, trade win rate, and net profitability are different measures. Selective accuracy is only meaningful alongside its coverage and the number of positive calls.
 
 ## Execution and cost assumptions
 
@@ -164,35 +131,20 @@ Long positions are constrained by premium-funded capital, a capital fraction, ma
 
 Risk returns use realized daily P&L divided by prior-day equity and include zero-trade dates from the market calendar. Sharpe and Sortino are annualized from daily returns using 252 sessions and the configured risk-free rate.
 
-## Outputs
-
-Processed files are written under `data/processed/`. Before the correction rebuild, the prior processed data, models, predictions, and reports were copied to `data/backup_pre_corrections_20261026/`. Raw files in `data/raw/` are left unchanged.
-
-The terminal reporting script reads saved model metrics and risk outputs; it does not provide an interactive dashboard. No broker connection or live order placement is implemented.
-
 ## Known limitations
 
-- Upstox historical candles do not provide bid/ask execution prices or historical margin requirements.
-- Black–Scholes uses a constant configured rate and does not model discrete dividends, volatility jumps, or market impact.
+- Upstox historical candles do not provide bid/ask execution prices or historical margin requirements. The paper-trading chain records real bid/ask only from the day it is switched on.
+- Black-Scholes uses a constant configured rate and does not model discrete dividends, volatility jumps, or market impact.
 - Backtest fills at candle opens are a transparent approximation; queue priority, partial fills, latency, and market impact are unavailable.
-- Hyperparameter search is intentionally small for reproducibility and runtime. Results should be repeated across additional chronological periods before drawing strategy conclusions.
-- Some legacy modules and API smoke scripts remain in the repository; not every file is part of the active pipeline.
+- Hyperparameter searches are intentionally small for reproducibility and runtime; results should be repeated across additional chronological periods before drawing strategy conclusions.
+- Machine-learning entries cannot yet run in live paper trading: the classifier needs a real-time option-chain feature service that is not built.
+- The forward-validation protocol is drafted but not frozen, and displayed order-book depth on the paper position size is untested until live sessions run.
 
-## Continuous deep-hedging research extensions
+## Disclaimer
 
-The isolated continuous short-option research track now includes the Phase 4
-cost-grid minimum viable project, Phase 7 whole-lot rounding bridge and Phase 5
-robustness experiments. See [RESEARCH_PHASES_4_7_5.md](RESEARCH_PHASES_4_7_5.md)
-for the experiment contracts, actual results, corrections, deliverables and
-reproduction commands. Canonical directories are recorded in `research_runs.json`.
+This is research software provided for educational and demonstration purposes. Nothing in this repository is investment advice,
+and no result here establishes that any strategy is profitable. Do not trade real money on the basis of this code.
 
-- [Minimum viable project report](data/research/phase4_cost_grid_20261031/report/MVP_RESEARCH_REPORT.md)
-- [Whole-lot bridge report](data/research/research_extension_delivery_20261031/phase7/report/ROUNDING_REPORT.md)
-- [Robustness report](data/research/research_extension_delivery_20261031/phase5_corrected/report_final/ROBUSTNESS_REPORT.md)
+## License
 
-These reports use synthetic paths and explicit normalized costs. Lower hedge
-tail loss is distinct from classification accuracy or trading profit. Frozen
-models, as-run source snapshots, common test-path banks, all-seed comparisons,
-paired conditional intervals, accounting replays and static PNG/PDF figures
-remain available. These runs do not promote a production model or establish
-prospective real-market performance.
+Released under the [MIT License](LICENSE).

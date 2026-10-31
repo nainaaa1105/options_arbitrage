@@ -35,3 +35,5 @@ project on that date; later reports supersede earlier ones where they disagree.
 | [IMPLEMENTATION_LOG_PHASES_6_9.md](IMPLEMENTATION_LOG_PHASES_6_9.md) | Change log for phases 6, 8, 0b, 9 and the accuracy programme |
 
 Small result tables and figures that back these reports are in [results/](results/). Large data and models are not committed.
+
+Result folders: [accuracy_v2](results/accuracy_v2), [phase6_gru](results/phase6_gru), [phase8_signal_handoff](results/phase8_signal_handoff), [continuous_hedging](results/continuous_hedging) (the cost-grid, rounding and robustness reports with their figures), [phase9_infrastructure](results/phase9_infrastructure), [paper_dry_run](results/paper_dry_run).
