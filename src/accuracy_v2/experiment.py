@@ -21,7 +21,6 @@ import numpy as np
 import optuna
 import pandas as pd
 import xgboost as xgb
-from catboost import CatBoostClassifier
 from sklearn.base import clone
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -92,6 +91,7 @@ def make_estimator(name, params=None):
                                  colsample_bytree=.8, reg_lambda=20., tree_method="hist", n_jobs=THREADS, random_state=42,
                                  eval_metric="logloss", **p)
     if name == "cat":
+        from catboost import CatBoostClassifier        # optional dependency (requirements/accuracy-v2.txt); only this model needs it
         return CatBoostClassifier(iterations=400, depth=5, learning_rate=.06, l2_leaf_reg=10., verbose=0, thread_count=THREADS,
                                   random_seed=42, **p)
     if name == "et":
