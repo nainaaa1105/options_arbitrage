@@ -65,7 +65,7 @@ events dated in the future, so no real-mode session can be fabricated by these t
 |---|---|
 | Shakedown | First **3** distinct forward days: excluded from the 60-day count, coverage, acceptance rate, quarantine and economic tests; still subject to integrity, reconciliation, drawdown and open-exposure gates |
 | Open positions at day end | Up to **2** session-days tolerated as recorded incidents (was 0); a third rejects |
-| New criterion | Cost efficiency: mean P&L given up per episode / CVaR95 reduction <= **1.0** (Part 3 historical ratio about 0.39) |
+| New criterion | Cost efficiency: mean P&L given up per episode / CVaR95 reduction <= **0.75** (Part 3 historical ratio 0.39; chosen by simulation, see [PROTOCOL_SENSITIVITY.md](PROTOCOL_SENSITIVITY.md)) |
 | Strategies | unhedged, static delta, dynamic delta, band delta, adapted-no-ML. `adapted_ml` is not allowed: it would silently equal no-ML |
 | Contracts | Four per week: ATM call, ATM put, ~1% OTM call, ~1% OTM put, from the nearest expiry with at least 3 trading days left; hedge future outliving the option. Rolled when fewer than 2 trading days remain or moneyness drifts more than 2% |
 | Accounts | 4 contracts x 5 strategies = 20 independent paper accounts, one shared quote request per snapshot |
@@ -90,7 +90,7 @@ Suite: 284 offline tests pass (network blocked); earlier registries unchanged.
 3. Token lifetime, rate limits and machine uptime over a full session.
 
 ## Freeze checklist (tomorrow evening)
-- [ ] You approve the table above (strategies, contracts, 3 shakedown days, 2-incident tolerance, 1.0 cost ceiling).
+- [ ] You approve the table above (strategies, contracts, 3 shakedown days, 2-incident tolerance, 0.75 cost ceiling).
 - [ ] Machine and token plan confirmed for Monday 09:00.
 - [ ] `tools\run_offline_tests.py` passes; `git status` shows no edits to frozen files since the dry run.
 - [ ] Freeze: `python src\forward_validation_cli.py freeze --run-dir data\research\historical_hedging_part3_final_20261031 --output data\validation\protocol_v1.json --registry data\validation\registry.jsonl` (with `PYTHONPATH=src`).

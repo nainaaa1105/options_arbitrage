@@ -1,0 +1,25 @@
+{
+  "episodes": 168,
+  "days": 28,
+  "episodes_per_day": 6,
+  "observed_cvar95_reduction": 6541.249110680957,
+  "observed_cost_per_episode": 2534.7031379805576,
+  "observed_cost_over_reduction": 0.3874952772921822,
+  "icc": {
+    "unhedged_pnl": {
+      "icc": 0.02747232629600794,
+      "design_effect": 1.1373616314800397,
+      "effective_episodes_of_168": 147.71027556238462
+    },
+    "dynamic_delta_pnl": {
+      "icc": 0.0,
+      "design_effect": 1.0,
+      "effective_episodes_of_168": 168.0
+    },
+    "paired_difference": {
+      "icc": 0.026357333392681346,
+      "design_effect": 1.1317866669634067,
+      "effective_episodes_of_168": 148.43786811055605
+    }
+  }
+}

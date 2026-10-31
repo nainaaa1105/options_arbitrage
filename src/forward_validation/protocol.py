@@ -21,8 +21,8 @@ DEFAULT_ACCEPTANCE = {
     "economic": {"claim": "hedging reduces episode loss CVaR95 versus unhedged on identical positions",
                  "candidate": "dynamic_delta", "reference": "unhedged", "require_interval_excludes_zero": True,
                  "bootstrap_repeats": 2000, "bootstrap_seed": 91},
-    "cost_efficiency": {"maximum_cost_per_unit_cvar_reduction": 1.0,
-                        "note": "Mean P&L given up per episode must not exceed the CVaR95 reduction it buys (Part 3 historical ratio was about 0.39)"},
+    "cost_efficiency": {"maximum_cost_per_unit_cvar_reduction": 0.75,
+                        "note": "Mean P&L given up per episode must not exceed 0.75 of the CVaR95 reduction it buys. Part 3 historical ratio was 0.39; a ceiling of 0.75 passes 98% of simulated 60-day windows at that cost and only 2% when hedging costs twice as much (docs/PROTOCOL_SENSITIVITY.md)"},
     "ml_claim": {"candidate": "adapted_ml", "reference": "adapted_no_ml", "metric": "mean episode net P&L difference",
                  "require_interval_excludes_zero": True, "applies_only_if_ml_strategy_registered": True},
 }
