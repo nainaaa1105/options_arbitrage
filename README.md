@@ -1,9 +1,13 @@
 # NIFTY Options Research Platform
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg) ![Status: research](https://img.shields.io/badge/status-research-lightgrey.svg)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) ![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg) ![Status: research](https://img.shields.io/badge/status-research-lightgrey.svg)
 
 Pricing, convergence prediction, hedging experiments and a frozen forward-validation protocol for NIFTY index options,
 built on Upstox market data. **Research system: no profitable trading edge is claimed, and no orders are ever placed.**
+
+> **About the repository name.** The folder and URL say `options_arbitrage` because the project began as a search for arbitrage.
+> The results are the opposite of an arbitrage claim: pricing gaps are partly predictable, but fees and hedging costs remove any
+> profit. The one-page evidence is in [docs/RESULTS_SUMMARY.md](docs/RESULTS_SUMMARY.md).
 
 ## At a glance
 
@@ -13,7 +17,7 @@ built on Upstox market data. **Research system: no profitable trading edge is cl
 | Prediction | 72.7% accuracy on later data vs 64.5% for always guessing the common outcome (AUC 0.788). A 93-94% target was investigated and ruled out: about a third of labels sit within half an index point of the cut-off, so tick-level noise caps the score ([report](docs/ACCURACY_V2_REPORT.md)) |
 | Entry selection | Classifier picks converge 67.1% of the time vs 47.5% for random picks among the same candidates, but this does not become a detectable profit after costs ([Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md)) |
 | Hedging | Delta hedging cuts worst-case loss by more than half but fees exceed the gain; a GRU policy is no better than an MLP ([Phase 6](docs/RESEARCH_PHASE_6.md)) |
-| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 290 offline tests with the network blocked |
+| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 293 offline tests with the network blocked |
 | Evidence integrity | Hash-chained validation protocol, independent ledger reconciliation, tamper detection ([Phase 9](docs/PHASE9_FORWARD_VALIDATION.md)) |
 | Forward test | Protocol drafted, **not yet frozen**; needs about 60 trading days of real quotes. Until then every number here is retrospective |
 
@@ -23,7 +27,7 @@ Small result tables and figures that back these claims are in [docs/results/](do
 
 ```text
 src/            pipeline, hedging research, paper trading and validation code (module map: src/README.md)
-tests/          290 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
+tests/          293 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
 tools/          offline test runner, clean-install check, scheduler scripts, demo scripts
 docs/           reports, runbook and results index (docs/README.md); docs/results/ holds small evidence tables
 requirements/   optional dependency sets (PyTorch CPU, reporting, CatBoost); base list is requirements.txt
@@ -51,18 +55,18 @@ Both need data and an Upstox token that are not in this repository.
 
 ## Documentation
 
-The full index is [docs/README.md](docs/README.md). The research tracks, in the order they were built:
+Start with [docs/RESULTS_SUMMARY.md](docs/RESULTS_SUMMARY.md), one page with every track's headline numbers, and [docs/STUDY_GUIDE.md](docs/STUDY_GUIDE.md), which explains the system and likely questions. The full index is [docs/README.md](docs/README.md); dated reports are kept in [docs/archive/](docs/archive/README.md). The research tracks, in the order they were built:
 
 | Track | Read |
 |---|---|
-| Data defect and rebuild (spot/option candle timing) | [ML_REAUDIT](docs/ML_REAUDIT.md), [DATA_MODEL_REMEDIATION_REPORT](docs/DATA_MODEL_REMEDIATION_REPORT.md), [ACCURACY_RECOVERY](docs/ACCURACY_RECOVERY_20261030.md) |
-| Hedging foundation, neural hedgers, ML-assisted hedging | [Part 1](docs/PART1_HEDGING_FOUNDATION.md), [Part 2](docs/PART2_DEEP_HEDGING.md), [Part 3](docs/PART3_HISTORICAL_ML_HEDGING.md) |
-| Continuous-time policies, cost grid, rounding, robustness | [Phases 0a-3](docs/CONTINUOUS_HEDGING_PHASES_0_3.md), [Phases 4/7/5](RESEARCH_PHASES_4_7_5.md), [reports with figures](docs/results/continuous_hedging) |
+| Data defect and rebuild (spot/option candle timing) | [ML_REAUDIT](docs/archive/ML_REAUDIT.md), [DATA_MODEL_REMEDIATION_REPORT](docs/archive/DATA_MODEL_REMEDIATION_REPORT.md), [ACCURACY_RECOVERY](docs/archive/ACCURACY_RECOVERY_20261030.md) |
+| Hedging foundation, neural hedgers, ML-assisted hedging | [Part 1](docs/archive/PART1_HEDGING_FOUNDATION.md), [Part 2](docs/archive/PART2_DEEP_HEDGING.md), [Part 3](docs/archive/PART3_HISTORICAL_ML_HEDGING.md) |
+| Continuous-time policies, cost grid, rounding, robustness | [Phases 0a-3](docs/archive/CONTINUOUS_HEDGING_PHASES_0_3.md), [Phases 4/7/5](RESEARCH_PHASES_4_7_5.md), [reports with figures](docs/results/continuous_hedging) |
 | GRU, ablations, ensembles | [Phase 6](docs/RESEARCH_PHASE_6.md) |
 | ML-selected entries plus hedging | [Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md) |
 | Accuracy programme | [ACCURACY_V2_REPORT](docs/ACCURACY_V2_REPORT.md) |
-| Dashboard, paper trading, operations, forward validation | [Part 4](docs/PART4_DASHBOARD_AND_PAPER_TRADING.md), [Phase 0b](docs/OPERATIONS_PHASE_0B.md), [Phase 9](docs/PHASE9_FORWARD_VALIDATION.md) |
-| Audits and status | [System audit](docs/SYSTEM_AUDIT_20261031.md), [Status and roadmap](docs/SYSTEM_STATUS_AND_ROADMAP_20261031.md), [Implementation log](docs/IMPLEMENTATION_LOG_PHASES_6_9.md) |
+| Dashboard, paper trading, operations, forward validation, protocol sensitivity | [Part 4](docs/archive/PART4_DASHBOARD_AND_PAPER_TRADING.md), [Phase 0b](docs/OPERATIONS_PHASE_0B.md), [Phase 9](docs/PHASE9_FORWARD_VALIDATION.md), [power analysis](docs/PROTOCOL_SENSITIVITY.md) |
+| Audits and status | [System audit](docs/archive/SYSTEM_AUDIT_20261031.md), [Status and roadmap](docs/archive/SYSTEM_STATUS_AND_ROADMAP_20261031.md), [Implementation log](docs/archive/IMPLEMENTATION_LOG_PHASES_6_9.md) |
 
 `research_runs.json` records the canonical corrected research run locations. Older artifacts under `data/processed` belong to the
 pre-correction pipeline and must not be mixed with the corrected models and feature context; the legacy training and signal
