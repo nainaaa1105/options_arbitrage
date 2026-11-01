@@ -1,0 +1,275 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIFTY Options Research Platform</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column; each finding sits beside its numbers.
+   Direction: instrument-panel restraint. Cool slate neutrals, one teal accent, semantic colors only for status. */
+:root{
+  --bg:#f2f5f7; --surface:#ffffff; --ink:#0e1a24; --muted:#4b5b68; --line:#d5dde3;
+  --accent:#0a6b7c; --accent-soft:#dff0f3; --good:#1b7a43; --warn:#9a5b00; --bad:#a63232; --bar:#9fb0bb;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace; --sans:"IBM Plex Sans",system-ui,Segoe UI,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0c1318; --surface:#131d24; --ink:#e3ebf0; --muted:#9db0bd; --line:#26343e;
+  --accent:#4cc3d6; --accent-soft:#12303a; --good:#5cc88a; --warn:#e0a040; --bad:#ee7a7a; --bar:#3d5361; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c1318; --surface:#131d24; --ink:#e3ebf0; --muted:#9db0bd; --line:#26343e;
+  --accent:#4cc3d6; --accent-soft:#12303a; --good:#5cc88a; --warn:#e0a040; --bad:#ee7a7a; --bar:#3d5361; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);margin:0;
+  padding-block:40px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:920px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+h1,h2,h3{text-wrap:balance;line-height:1.2;margin:0}
+h1{font-size:clamp(30px,5vw,44px);font-weight:600;letter-spacing:-.01em}
+h2{font-size:22px;font-weight:600}
+h3{font-size:16px;font-weight:600}
+p{margin:0;max-width:68ch}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:19px;color:var(--muted);margin-top:14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font:500 12px/1 var(--mono);padding:7px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--muted)}
+.chip b{font-weight:500;color:var(--ink)}
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:0;border-block:1px solid var(--line)}
+.fact{padding:18px 18px 18px 0}
+.fact+.fact{padding-left:18px;border-left:1px solid var(--line)}
+.fact .n{font:500 26px/1.1 var(--mono);font-variant-numeric:tabular-nums}
+.fact .l{color:var(--muted);font-size:14px;margin-top:6px}
+section{display:flex;flex-direction:column;gap:20px}
+.flow{display:flex;flex-wrap:wrap;gap:10px;align-items:stretch}
+.step{flex:1 1 230px;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+.step .k{font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+.step p{font-size:14px;color:var(--muted);margin-top:8px}
+.finding{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:28px;align-items:start;padding-top:24px;border-top:1px solid var(--line)}
+@media (max-width:720px){.finding{grid-template-columns:minmax(0,1fr)}.fact+.fact{border-left:0;padding-left:0}.fact{padding-right:0}}
+.finding .say{display:flex;flex-direction:column;gap:10px}
+.verdict{font:500 12px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.verdict.ok{color:var(--good)}.verdict.no{color:var(--bad)}.verdict.mid{color:var(--warn)}
+.plot{display:flex;flex-direction:column;gap:10px;min-width:0}
+.row{display:grid;grid-template-columns:minmax(96px,34%) minmax(0,1fr) 56px;gap:10px;align-items:center;font-size:14px}
+.row .name{color:var(--muted);overflow-wrap:anywhere}
+.track{position:relative;height:12px;background:var(--line);border-radius:2px}
+.fill{position:absolute;inset:0 auto 0 0;background:var(--bar);border-radius:2px}
+.fill.hi{background:var(--accent)}
+.val{font:500 13px/1 var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.note{font-size:13px;color:var(--muted);max-width:60ch}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:9px 12px 9px 0;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px/1.3 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto}
+.pos{color:var(--good)}.neg{color:var(--bad)}
+ul.plain{margin:0;padding:0;list-style:none;display:grid;gap:14px}
+ul.plain li{padding-left:16px;position:relative;max-width:72ch}
+ul.plain li::before{content:"";position:absolute;left:0;top:.62em;width:6px;height:2px;background:var(--accent)}
+ul.plain b{font-weight:600}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px}
+.two>div{min-width:0}
+code{font:400 .9em var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:3px}
+.cmds{display:grid;gap:14px}
+.cmd{min-width:0}
+.cmd h3{margin-bottom:6px}
+pre{margin:0;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow-x:auto;font:400 13px/1.55 var(--mono);color:var(--ink)}
+.lesson{background:var(--accent-soft);border-left:3px solid var(--accent);padding:14px 16px;border-radius:0 6px 6px 0;max-width:72ch}
+footer{color:var(--muted);font-size:14px;border-top:1px solid var(--line);padding-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px}
+a{color:var(--accent)}
+a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<main>
+<header>
+  <div class="eyebrow">Quantitative research · deep learning · NIFTY index options</div>
+  <h1 style="margin-top:14px">NIFTY Options Research Platform</h1>
+  <p class="lede">An end-to-end system that prices options, predicts pricing deviations, trains neural hedging policies on tail risk, and tests the result under costs with a forward test whose rules are frozen in advance.</p>
+  <div class="chips">
+    <span class="chip"><b>Scope</b> data → models → simulation → paper trading</span>
+    <span class="chip"><b>Profitable edge</b> not established, and measured why</span>
+    <span class="chip"><b>Forward test</b> software ready, protocol awaiting approval</span>
+  </div>
+</header>
+
+<div class="facts" role="list">
+  <div class="fact" role="listitem"><div class="n">941,949</div><div class="l">five-minute option candles, 60 weekly expiries, 283 sessions</div></div>
+  <div class="fact" role="listitem"><div class="n">8.45%</div><div class="l">of labels corrupted by a timing bug the project found and fixed</div></div>
+  <div class="fact" role="listitem"><div class="n">309</div><div class="l">automated tests, run with the network blocked and no credentials</div></div>
+  <div class="fact" role="listitem"><div class="n">20 / 20</div><div class="l">paper accounts reconciled to the rupee in a full-session dry run</div></div>
+</div>
+
+<section>
+  <div><div class="eyebrow">The lifecycle</div><h2 style="margin-top:10px">From raw candles to a frozen forward test</h2></div>
+  <div class="flow">
+    <div class="step"><div class="k">1 · Data engineering</div><p>Expired and live option candles, spot, futures and India VIX from Upstox, aligned so every price is observed at the same instant. Resumable collection with manifests.</p></div>
+    <div class="step"><div class="k">2 · Pricing and features</div><p>Black-Scholes implied volatility and Greeks, a leave-one-out volatility surface, price deviations and put-call parity residuals. All features causal by construction.</p></div>
+    <div class="step"><div class="k">3 · Prediction</div><p>Will a pricing gap shrink by half within 30 minutes? XGBoost, LightGBM, CatBoost and stacked ensembles, validated in time order with purging.</p></div>
+    <div class="step"><div class="k">4 · Deep-learning hedging</div><p>MLP and GRU policies trained with a CVaR objective on simulated GBM and Heston paths, benchmarked against delta and band hedging under costs.</p></div>
+    <div class="step"><div class="k">5 · Paper trading</div><p>Bid/ask fills, fees and margin in a restart-safe ledger. 20 accounts run in parallel on identical positions. The code cannot place orders.</p></div>
+    <div class="step"><div class="k">6 · Validation</div><p>A hash-chained protocol written before the test starts, an independent ledger audit and predeclared pass or fail criteria.</p></div>
+  </div>
+</section>
+
+<section>
+  <div><div class="eyebrow">Deep learning for risk management</div><h2 style="margin-top:10px">Can a learned hedge beat delta hedging?</h2></div>
+  <div class="finding" style="border-top:0;padding-top:0">
+    <div class="say">
+      <div class="verdict mid">Tail risk falls in simulation, simple baselines still compete</div>
+      <h3>MLP and GRU policies trained on CVaR</h3>
+      <p>Instead of optimising average return, the policies minimise the average loss in the worst 5% of outcomes (CVaR95). Training paths come from Geometric Brownian Motion and the Heston stochastic-volatility model; evaluation adds transaction costs, position limits and whole-lot rounding.</p>
+      <p>The neural policy lowers loss CVaR95 against delta hedging in every world tested, but the reduction shrinks when the volatility model is harder.</p>
+    </div>
+    <div class="plot" aria-label="Neural policy reduction in loss CVaR95 against delta hedging, by simulated world">
+      <div class="row"><span class="name">GBM paths</span><span class="track"><span class="fill hi" style="width:64%"></span></span><span class="val">−12.8%</span></div>
+      <div class="row"><span class="name">Bootstrapped paths</span><span class="track"><span class="fill hi" style="width:45.5%"></span></span><span class="val">−9.1%</span></div>
+      <div class="row"><span class="name">Heston paths</span><span class="track"><span class="fill hi" style="width:31%"></span></span><span class="val">−6.2%</span></div>
+      <p class="note">Reduction in loss CVaR95 versus delta hedging; scale 0 to 20%. Best single result: 0.00993 against 0.01181 (−15.9%) at a cost of 0.001 per unit traded.</p>
+    </div>
+  </div>
+  <div class="finding">
+    <div class="say">
+      <div class="verdict no">What simpler methods did better</div>
+      <h3>Benchmark against the boring alternative</h3>
+      <p>A tuned no-trade band delivered the better mean P&amp;L. A GRU was 1.8% worse than a feed-forward network (memory had nothing to add), ensembles added nothing, and whole-lot rounding kept the trained policy about 17% above the continuous optimum while a rounded conventional hedge came within about 1%.</p>
+    </div>
+    <div class="plot scroll">
+      <table>
+        <thead><tr><th>Experiment</th><th class="num">Result</th></tr></thead>
+        <tbody>
+          <tr><td>Neural vs delta, CVaR95</td><td class="num pos">−6% to −16%</td></tr>
+          <tr><td>Tuned no-trade band vs neural, mean P&amp;L</td><td class="num neg">band better</td></tr>
+          <tr><td>GRU vs MLP</td><td class="num neg">+1.8% worse</td></tr>
+          <tr><td>Ensembles</td><td class="num">no gain</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Simulation results; each carries a confidence interval in the phase reports.</p>
+    </div>
+  </div>
+  <p class="lesson"><b>Lesson the project is built around:</b> always benchmark the sophisticated model against the simplest credible alternative, under the same costs, before believing it.</p>
+</section>
+
+<section>
+  <div><div class="eyebrow">What it found on real data</div><h2 style="margin-top:10px">Real signal, no edge after costs</h2></div>
+
+  <div class="finding">
+    <div class="say">
+      <div class="verdict ok">Signal is real and transfers</div>
+      <h3>Predicting whether a pricing gap closes</h3>
+      <p>The classifier separates gaps that close from those that do not on later data, and the frozen model then held on an earlier year it had never seen (227 sessions, no refitting). Pushing the score far higher was tested as a stress test and ruled out: about a third of labels sit within half an index point of the cut-off, where tick noise decides them.</p>
+    </div>
+    <div class="plot" aria-label="ROC AUC, scale 0.5 (chance) to 0.8">
+      <div class="row"><span class="name">Chance</span><span class="track"><span class="fill" style="width:0.5%"></span></span><span class="val">0.50</span></div>
+      <div class="row"><span class="name">Earlier year (holdout)</span><span class="track"><span class="fill hi" style="width:91%"></span></span><span class="val">0.77</span></div>
+      <div class="row"><span class="name">Later period</span><span class="track"><span class="fill hi" style="width:96%"></span></span><span class="val">0.79</span></div>
+      <p class="note">ROC AUC. The earlier-year test checks regime transfer, not forward prediction; the model was trained on later data. The later period was reviewed during development, so it is retrospective.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="say">
+      <div class="verdict ok">Selection works</div>
+      <h3>Choosing which option to buy</h3>
+      <p>When the classifier picks the entry, the mispricing closes far more often than for random, largest-gap or all eligible candidates.</p>
+    </div>
+    <div class="plot" aria-label="Share of selected entries whose pricing gap closed">
+      <div class="row"><span class="name">Classifier picks</span><span class="track"><span class="fill hi" style="width:67.1%"></span></span><span class="val">67.1%</span></div>
+      <div class="row"><span class="name">Largest-gap rule</span><span class="track"><span class="fill" style="width:50.3%"></span></span><span class="val">50.3%</span></div>
+      <div class="row"><span class="name">Random candidate</span><span class="track"><span class="fill" style="width:47.5%"></span></span><span class="val">47.5%</span></div>
+      <div class="row"><span class="name">All candidates</span><span class="track"><span class="fill" style="width:44.1%"></span></span><span class="val">44.1%</span></div>
+      <p class="note">760 paired entries, same slots and costs for every rule. Share of entries whose gap shrank by at least half in 30 minutes.</p>
+    </div>
+  </div>
+
+  <div class="finding">
+    <div class="say">
+      <div class="verdict no">Costs decide</div>
+      <h3>Why a good classifier still does not pay</h3>
+      <p>The price move after entry is statistically zero, while each round trip costs about ₹430–450 in spread, slippage, brokerage, charges and tax. A gap closing is a statement about distance to a model price, not about the option's own P&amp;L.</p>
+      <p>Hedging buys safety, not profit: it cuts the worst-5% loss by 59% for about ₹2,500 of mean P&amp;L per position.</p>
+    </div>
+    <div class="plot scroll">
+      <table>
+        <thead><tr><th>Mean per trade, ₹</th><th class="num">Gross move</th><th class="num">Cost</th><th class="num">Net</th></tr></thead>
+        <tbody>
+          <tr><td>History, 45,624 trades</td><td class="num">−39</td><td class="num">431</td><td class="num neg">−470</td></tr>
+          <tr><td>Later period, 5,184</td><td class="num">+142</td><td class="num">448</td><td class="num neg">−306</td></tr>
+        </tbody>
+      </table>
+      <table style="margin-top:14px">
+        <thead><tr><th>168 test positions</th><th class="num">Net P&amp;L</th><th class="num">Worst-5% loss</th></tr></thead>
+        <tbody>
+          <tr><td>Unhedged</td><td class="num pos">+₹80,828</td><td class="num">₹11,097</td></tr>
+          <tr><td>Dynamic delta hedge</td><td class="num neg">−₹345,002</td><td class="num">₹4,555</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Gross-move intervals include zero in both periods. Retrospective, with configured cost assumptions on candle data.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div><div class="eyebrow">Engineering discipline</div><h2 style="margin-top:10px">Why the numbers can be trusted</h2></div>
+  <ul class="plain">
+    <li><b>Found and fixed its own data bug.</b> Option and spot candles were paired by start time instead of close time. Correcting it changed 515,903 of 519,725 spot values (median 7.4 index points) and flipped 8.45% of comparable labels. Everything downstream was rebuilt.</li>
+    <li><b>Leakage controls that are tested.</b> Training labels must finish before a validation block starts, with a one-session gap. Feature builders are tested to give identical values when all later data is removed, and shuffled labels score near chance.</li>
+    <li><b>Live features equal batch features.</b> A bar-by-bar feature service reproduces the stored datasets exactly and the frozen model's probabilities to about 1e-16 in replay, at roughly 1.5 seconds per bar.</li>
+    <li><b>Evidence that cannot be edited quietly.</b> The forward-test criteria, code hashes and allowed models are frozen in a hash-chained file. Lowering the 60-day bar is rejected on load. Changing one simulated fill by half a rupee is caught by an independent ledger replay as a ₹130 discrepancy.</li>
+    <li><b>Negative results reported.</b> A recurrent policy, ensembles, a classifier-assisted hedger, profit-based targets and a far higher score target were tested and did not win. Each is documented with its interval.</li>
+    <li><b>Operational safety.</b> Malformed input is quarantined, a single writer holds each account, closes retry on failure, CI runs on Python 3.12 and 3.13 with lint and type checks, and the test runner blocks sockets so no test can reach the vendor.</li>
+  </ul>
+</section>
+
+<section>
+  <div><div class="eyebrow">Run it</div><h2 style="margin-top:10px">Commands (Windows PowerShell, from the repository root)</h2></div>
+  <div class="cmds">
+    <div class="cmd"><h3>1 · Set up and run the test suite (no data, no token)</h3>
+<pre>python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+$env:PYTHONPATH = "src"
+.\.venv\Scripts\python.exe tools\run_offline_tests.py</pre></div>
+    <div class="cmd"><h3>2 · End-to-end demo on invented data (no data, no token)</h3>
+<pre>.\.venv\Scripts\python.exe tools\synthetic_demo.py --output data\synthetic_demo</pre></div>
+    <div class="cmd"><h3>3 · Neural hedging tests (GRU and MLP policies, offline)</h3>
+<pre>.\.venv\Scripts\python.exe -m unittest tests.test_phase6_recurrent tests.test_continuous_hedging -v</pre></div>
+    <div class="cmd"><h3>4 · Paper-trading day replay (stored real candles, synthetic quotes; needs local data and a token)</h3>
+<pre>.\.venv\Scripts\python.exe src\run_paper_day.py replay --date 2026-10-30 --only ATM_CE --strategies unhedged dynamic_delta --base data\paper\demo_run</pre></div>
+    <div class="cmd"><h3>5 · Tamper-evidence demo (needs local data)</h3>
+<pre>.\.venv\Scripts\python.exe tools\demo_tamper_check.py</pre></div>
+  </div>
+  <p class="note">The repository is read-only toward the broker; nothing here can place an order. Commands 4 and 5 need local data and a token that are not in the repository.</p>
+</section>
+
+<section>
+  <div><div class="eyebrow">What happens next</div><h2 style="margin-top:10px">A forward test with the rules fixed in advance</h2></div>
+  <div class="two">
+    <div>
+      <p>Four option contracts (at-the-money and one percent out-of-the-money, calls and puts) across five hedging strategies make 20 paper accounts. Fills use recorded bid and ask with fees and margin. The first three sessions are shakedown days; the test then needs 60 trading days.</p>
+      <p class="note" style="margin-top:12px">Dry run on a stored Friday session (real candles, synthetic quotes): 840 events, every account reconciled, nothing left open. It verifies the software and says nothing about markets.</p>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Criterion</th><th class="num">Rule</th></tr></thead>
+        <tbody>
+          <tr><td>Forward trading days</td><td class="num">≥ 60</td></tr>
+          <tr><td>Event coverage and acceptance</td><td class="num">≥ 90%</td></tr>
+          <tr><td>Max drawdown</td><td class="num">≤ 10%</td></tr>
+          <tr><td>Ledger reconciliation</td><td class="num">exact</td></tr>
+          <tr><td>Cost per unit of risk removed</td><td class="num">≤ 0.75</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div><div class="eyebrow">Limits</div><h2 style="margin-top:10px">What this does not show</h2></div>
+  <ul class="plain">
+    <li>No profitable trading edge. Hedged results lose to costs in every experiment.</li>
+    <li>Fills use configured fee and margin proxies on candle data. Real order-book depth and partial fills are untested until the forward test runs.</li>
+    <li>Later-period results were reviewed while building the models, so they are retrospective. The earlier-year check tests regime transfer. Only the forward test can confirm anything going forward.</li>
+    <li>The real-time feature service is verified in replay but not yet connected to the paper-trading loop, so machine-learning entries have not run live.</li>
+  </ul>
+</section>
+
+<footer>
+  <span>Python · pandas · NumPy · SciPy · scikit-learn · XGBoost · LightGBM · CatBoost · Optuna · PyTorch · SQLite · GitHub Actions</span>
+  <span>Source: github.com/nainaaa1105/options_arbitrage</span>
+</footer>
+</main>
