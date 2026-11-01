@@ -21,6 +21,8 @@ Start with the [project README](../README.md), then these two:
 | [PHASE9_FORWARD_VALIDATION.md](PHASE9_FORWARD_VALIDATION.md) | Frozen protocol, acceptance rules, freeze checklist |
 | [PROTOCOL_SENSITIVITY.md](PROTOCOL_SENSITIVITY.md) | How likely the criteria are to pass or fail, and why the thresholds are set where they are |
 | [CARRY_AND_PNL_CHECKS.md](CARRY_AND_PNL_CHECKS.md) | Whether the fixed 6% carry creates fake mispricing, and whether any classifier predicts net profit |
+| [OLDER_REGIME_HOLDOUT.md](OLDER_REGIME_HOLDOUT.md) | The frozen classifier applied once to 227 earlier sessions it never saw |
+| [PHASE9_PREFLIGHT.md](PHASE9_PREFLIGHT.md) | Approval sheet, freeze checklist and Monday checklist for the forward window |
 | [OPERATIONS_PHASE_0B.md](OPERATIONS_PHASE_0B.md) | Operational hardening and what is still missing |
 | [RUNBOOK_PAPER_OPERATIONS.md](RUNBOOK_PAPER_OPERATIONS.md) | Daily checklist, exit codes, alerts, recovery |
 | [DEMO_SCRIPT.md](DEMO_SCRIPT.md) | A 5-minute walkthrough with Q&A |

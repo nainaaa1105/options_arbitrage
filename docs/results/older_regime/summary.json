@@ -1,0 +1,24 @@
+{
+  "rows": 111900,
+  "sessions": 227,
+  "period": [
+    "2024-09-26 09:15:00+05:30",
+    "2025-09-02 09:25:00+05:30"
+  ],
+  "positive_rate": 0.38693476318141196,
+  "model_accuracy_at_0.5": 0.7049597855227882,
+  "majority_class_accuracy": 0.613065236818588,
+  "roc_auc": 0.7730663141577043,
+  "frozen_threshold": 0.53,
+  "accuracy_at_frozen_threshold": 0.7062287756925827,
+  "accuracy_gain_over_majority": {
+    "mean": 0.09189454870420018,
+    "lower95": 0.0848639327555568,
+    "upper95": 0.09888613530044206
+  },
+  "model_accuracy_session_ci95": {
+    "mean": 0.7049597855227882,
+    "lower95": 0.6991177729775787,
+    "upper95": 0.7111291222195865
+  }
+}

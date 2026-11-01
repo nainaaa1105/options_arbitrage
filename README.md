@@ -17,7 +17,7 @@ built on Upstox market data. **Research system: no profitable trading edge is cl
 | Prediction | 72.7% accuracy on later data vs 64.5% for always guessing the common outcome (AUC 0.788). A 93-94% target was investigated and ruled out: about a third of labels sit within half an index point of the cut-off, so tick-level noise caps the score ([report](docs/ACCURACY_V2_REPORT.md)) |
 | Entry selection | Classifier picks converge 67.1% of the time vs 47.5% for random picks among the same candidates, but this does not become a detectable profit after costs ([Phase 8](docs/PHASE8_SIGNAL_HANDOFF.md)) |
 | Hedging | Delta hedging cuts worst-case loss by more than half but fees exceed the gain; a GRU policy is no better than an MLP ([Phase 6](docs/RESEARCH_PHASE_6.md)) |
-| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 301 offline tests with the network blocked |
+| Rigor | Fixed a spot/option timing bug (changed 8.45% of labels); purged time-ordered validation; leakage tests; 309 offline tests with the network blocked |
 | Evidence integrity | Hash-chained validation protocol, independent ledger reconciliation, tamper detection ([Phase 9](docs/PHASE9_FORWARD_VALIDATION.md)) |
 | Forward test | Protocol drafted, **not yet frozen**; needs about 60 trading days of real quotes. Until then every number here is retrospective |
 
@@ -27,7 +27,7 @@ Small result tables and figures that back these claims are in [docs/results/](do
 
 ```text
 src/            pipeline, hedging research, paper trading and validation code (module map: src/README.md)
-tests/          301 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
+tests/          309 offline tests (unit, accounting, leakage, fault injection, end to end on synthetic data)
 tools/          offline test runner, clean-install check, scheduler scripts, demo and parity-check scripts
 docs/           reports, runbook and results index (docs/README.md); docs/results/ holds small evidence tables
 requirements/   optional dependency sets (PyTorch CPU, reporting, CatBoost); base list is requirements.txt
@@ -60,6 +60,8 @@ about markets.
 ```powershell
 .\.venv\Scripts\python.exe tools\synthetic_demo.py --output data\synthetic_demo
 ```
+
+On an earlier, never-inspected year (227 sessions, Sep 2024 - Aug 2025) the frozen classifier scores 70.5% against a 61.3% majority baseline, AUC 0.77 ([docs/OLDER_REGIME_HOLDOUT.md](docs/OLDER_REGIME_HOLDOUT.md)).
 
 Checks added after the main results ([docs/CARRY_AND_PNL_CHECKS.md](docs/CARRY_AND_PNL_CHECKS.md)): the fixed 6% carry assumption barely moves the labels,
 and no classifier predicts net profit after costs. `src/chain_features.py` computes the features bar by bar for live use and reproduces the

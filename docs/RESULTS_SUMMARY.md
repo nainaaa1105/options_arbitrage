@@ -45,5 +45,5 @@ positive calls. Detail: [ACCURACY_V2_REPORT.md](ACCURACY_V2_REPORT.md).
 |---|---|
 | Full-session replay, 20 accounts, real candles with synthetic quotes | 840 events, every account reconciles, nothing left open |
 | Tamper detection | Editing the frozen protocol is rejected; one altered fill is caught as a 130-rupee error |
-| Tests | 301 offline tests, network blocked ([OPERATIONS_PHASE_0B.md](OPERATIONS_PHASE_0B.md)) |
+| Tests | 309 offline tests, network blocked ([OPERATIONS_PHASE_0B.md](OPERATIONS_PHASE_0B.md)) |
 | Forward test | Protocol drafted and analysed ([PROTOCOL_SENSITIVITY.md](PROTOCOL_SENSITIVITY.md)); **not frozen, not started** |

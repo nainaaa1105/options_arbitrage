@@ -21,7 +21,16 @@ from paper_ops.market import INDEX_KEY, ReplayMarket, UpstoxMarket, fetch_replay
 
 IST = "Asia/Kolkata"
 DEFAULT_RUN = Path("data/research/historical_hedging_part3_final_20261031")
-DEFAULT_MASTER = Path("data/raw/upstox/instruments/NSE_20261031.json.gz")
+MASTER_DIR = Path("data/raw/upstox/instruments")
+
+
+def latest_master():
+    """Newest dated snapshot in the instruments folder, so a refreshed file is picked up without editing code."""
+    found = sorted(MASTER_DIR.glob("NSE_*.json.gz"))
+    return found[-1] if found else MASTER_DIR / "NSE_missing.json.gz"
+
+
+DEFAULT_MASTER = latest_master()
 
 
 def preflight(master, live):
