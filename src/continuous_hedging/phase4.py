@@ -1,8 +1,7 @@
 """Predeclared cost grid, exact/approximate hold-region diagnostics and MVP gate."""
 import argparse
-from dataclasses import asdict,replace
+from dataclasses import asdict
 from pathlib import Path
-import numpy as np
 import pandas as pd
 import torch
 from .config import ResearchConfig,FitConfig
@@ -10,7 +9,7 @@ from .market import simulate,bs
 from .training import fit,load
 from .policies import features
 from .accounting import pnl
-from .baselines import baseline,ww_width
+from .baselines import baseline
 from .evaluation import metrics,paired_intervals
 from .run import select_baselines
 from .experiment_utils import begin,freeze,dump,save_batch,infer,save_execution
@@ -41,7 +40,7 @@ def hold_diagnostic(model,c):
 
 
 def run(output,settings):
-    plan=begin(output,{'phase':4,'costs':COSTS,'settings':asdict(settings),'market':asdict(ResearchConfig()),
+    begin(output,{'phase':4,'costs':COSTS,'settings':asdict(settings),'market':asdict(ResearchConfig()),
         'families':['mlp','band'],'objectives':['cvar','entropic'],'validation_seed':135001,'test_seed':185001,
         'hold_diagnostic_epsilon':.005,'claim_rule':'Band architecture imposes no-trade structure; MLP hold region is measured, never assumed',
         'paired_bootstrap':'IID synthetic paths conditional on the GBM specification; not real-market confidence',
@@ -60,7 +59,7 @@ def run(output,settings):
                 winner=min(candidates,key=lambda r:(r['validation_objective'],r['seed']))
                 selections[f'{index}_{objective}_{family}']={'selected':winner,'all_seeds':candidates,
                     'path':str((sub/winner['checkpoint']).relative_to(output))}
-    frozen=freeze(output,selections,baselines=base_choices)
+    freeze(output,selections,baselines=base_choices)
     rows=[];paired=[];gates=[];replay={}
     for index,cost in enumerate(COSTS):
         c=ResearchConfig(cost_rate=cost);batch=simulate(c,settings.test_paths,seed=185001)

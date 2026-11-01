@@ -166,7 +166,6 @@ def generate_trading_signals(
     n_high_conf = int(signals_df["is_high_confidence"].sum())
     n_buy = int((signals_df["signal_action"] == "CONVERGENCE_CANDIDATE").sum())
     n_no_trade = int((signals_df["signal_action"] == "NO_TRADE").sum())
-    n_abstain = 0
 
     print("\n" + "=" * 80)
     print("TRADING SIGNALS SUMMARY")

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 
 from .accounting import pnl
 from .baselines import baseline
@@ -124,7 +123,7 @@ def correlation(a, b):
 
 def run(output, settings, costs=COSTS, ablations=True):
     primary_cost = costs[min(PRIMARY_COST_INDEX, len(costs) - 1)]
-    plan = begin(output, {
+    begin(output, {
         'phase': 6, 'costs': list(costs), 'objectives': list(OBJECTIVES), 'primary_cost': primary_cost,
         'settings': asdict(settings), 'market': asdict(ResearchConfig()),
         'core_specs': [asdict(s) for s in CORE],
@@ -171,7 +170,6 @@ def run(output, settings, costs=COSTS, ablations=True):
         for objective in OBJECTIVES:
             key = f'{index}_{objective}'
             choice = baseline_choices[key]
-            base_rows = {}
             for name in ('unhedged', 'delta', 'constant_band', 'whalley_wilmott'):
                 h = baseline(batch, c, name, width=choice['constant_band'], aversion=choice['whalley_wilmott'])
                 result = pnl(batch, h, c)

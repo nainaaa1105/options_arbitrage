@@ -16,7 +16,7 @@ from torch import nn
 from .accounting import pnl
 from .evaluation import metrics
 from .objectives import risk
-from .policies import BandPolicy, ContinuousPolicy, FEATURES, features
+from .policies import ContinuousPolicy, FEATURES, features
 from .market import simulate
 
 SCHEMA = 'phase6_step_policy'

@@ -1,0 +1,21 @@
+{
+  "assumed_annual_rate": 0.06,
+  "snapshots_used": 17870,
+  "sessions": 239,
+  "parity_implied_carry": {
+    "median": 0.07447729564199415,
+    "p10": -0.02369721868496063,
+    "p90": 0.22530433136127273
+  },
+  "forward_error_points": {
+    "median": 4.112635030707679,
+    "median_abs": 13.245884157529872,
+    "p90_abs": 37.95393235508782
+  },
+  "futures_implied_carry": {
+    "median": 0.06232794384161538,
+    "p10": 0.013744470175956282,
+    "p90": 0.09628523223232208,
+    "snapshots": 18237
+  }
+}

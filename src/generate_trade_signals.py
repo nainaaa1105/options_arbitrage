@@ -73,7 +73,7 @@ def generate_actionable_trade_signals(
 
     prob = df["predicted_probability"]
     dev  = df["price_deviation"]
-    conf = df["confidence"]
+    df["confidence"]
 
     # By default use the validation-selected cutoff carried with the signal.
     # An explicit CLI/function threshold remains available for controlled studies.

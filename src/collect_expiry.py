@@ -5,7 +5,6 @@ from candle_alignment import align_option_spot_candles
 
 from config import (
     UPSTOX_RAW_DIR,
-    OPTION_TIMEFRAME,
 )
 
 from prepare_expiry import (

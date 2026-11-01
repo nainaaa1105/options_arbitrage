@@ -1,0 +1,11 @@
+{
+  "baseline_rate": 0.06,
+  "sessions": 30,
+  "rows": 100724,
+  "rates_tested": [
+    0.03,
+    0.045,
+    0.075,
+    0.09
+  ]
+}

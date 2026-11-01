@@ -18,7 +18,7 @@ Have these open in tabs: the project page, `ACCURACY_V2_REPORT.md`, `PHASE8_SIGN
 | 1:30 | Selection plot and hedging table | "The classifier does pick better entries: 67% close versus 47% for random. But after fees nothing is profitable, and hedging cuts the worst case by more than half while costing more than it saves. I report that plainly." |
 | 2:15 | Terminal: the replay command from above (25 s) | "This runs a full paper-trading day from stored real candles with synthetic quotes: open, hedge every five minutes, close, with fees. Both accounts reconcile. Unhedged lost about 1.5k, dynamic delta lost about 21k, of which 15k was fees." |
 | 3:15 | Terminal: `python tools\demo_tamper_check.py` (30 s) | "Evidence integrity: the forward-test rules are hash-chained. Lowering the bar from 60 to 3 days is rejected on load. Editing one simulated fill by half a rupee is caught by an independent ledger replay as a 130-rupee error." |
-| 4:00 | Page: engineering and limits sections | "I found my own timing bug: option and spot candles were paired by start time rather than close time. Fixing it changed 8.45% of labels and I rebuilt everything. 284 tests run with the network blocked." |
+| 4:00 | Page: engineering and limits sections | "I found my own timing bug: option and spot candles were paired by start time rather than close time. Fixing it changed 8.45% of labels and I rebuilt everything. 301 tests run with the network blocked." |
 | 4:40 | Page: forward test | "Next step is a 60-day forward test on live quotes with predeclared pass or fail criteria. It starts with three shakedown days. Today it is not frozen, so every figure here is retrospective." |
 
 ## The 2-minute cut

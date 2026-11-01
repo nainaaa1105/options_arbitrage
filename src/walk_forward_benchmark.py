@@ -5,7 +5,6 @@ It never reads the validation or test split and does not overwrite the selected
 production model. Metrics use a fixed 0.50 probability cutoff for comparability.
 """
 
-from pathlib import Path
 import json
 
 import joblib

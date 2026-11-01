@@ -1,0 +1,69 @@
+{
+  "candidates": {
+    "history": {
+      "rows": 45624,
+      "mean_net_pnl": -469.6077851936178,
+      "win_rate": 0.46039365246361563
+    },
+    "fresh": {
+      "rows": 5184,
+      "mean_net_pnl": -305.5191319684038,
+      "win_rate": 0.47646604938271603
+    }
+  },
+  "cost_model": "Part 3 HedgeConfig: half-spread and slippage 0.15 each, tick 0.05, brokerage, exchange, SEBI, stamp, GST, STT; 4 lots; fills at candle opens",
+  "results_inr_per_trade": {
+    "all_candidates_blocks_3_5": {
+      "mean": -515.5052296485567,
+      "lower95": -731.5205730980106,
+      "upper95": -271.3192380937264
+    },
+    "profit_classifier_top20pct": {
+      "mean": -345.67961462287496,
+      "lower95": -978.7597053926205,
+      "upper95": 316.2201776311463,
+      "rows": 4409,
+      "win_rate": 0.4572465411657972
+    },
+    "selected_minus_all": {
+      "mean": 191.9267959018846,
+      "lower95": -348.62503419778426,
+      "upper95": 738.6218550191891
+    },
+    "convergence_classifier_top20pct_blocks_4_5": {
+      "mean": -615.5997062142509,
+      "lower95": -1071.0258157211358,
+      "upper95": -151.6255465602974,
+      "rows": 2298
+    },
+    "all_candidates_blocks_4_5": {
+      "mean": -437.5806059656117,
+      "lower95": -614.3277932783506,
+      "upper95": -255.62261164356
+    },
+    "convergence_selected_minus_all_blocks_4_5": {
+      "mean": -182.33788629017516,
+      "lower95": -559.4712096502739,
+      "upper95": 161.353108498091
+    },
+    "fresh_all_candidates": {
+      "mean": -305.5191319684038,
+      "lower95": -949.6193979223341,
+      "upper95": 346.29309777925323
+    },
+    "fresh_selected": {
+      "mean": 376.0400852176182,
+      "lower95": -716.9541184686761,
+      "upper95": 1434.5472329888576,
+      "rows": 691,
+      "win_rate": 0.5021707670043415,
+      "share_selected": 0.13329475308641975
+    },
+    "fresh_selected_minus_all": {
+      "mean": 681.5592171860224,
+      "lower95": -814.9383700541946,
+      "upper95": 2251.9744104054917
+    },
+    "fresh_auc": 0.5053590767918037
+  }
+}

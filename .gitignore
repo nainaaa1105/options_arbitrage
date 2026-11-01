@@ -18,3 +18,5 @@ data/
 .matplotlib_cache/
 
 catboost_info/
+
+.coverage

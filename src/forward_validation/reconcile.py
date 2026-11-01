@@ -16,7 +16,7 @@ def reconcile_session(session_dir, tolerance=1e-6):
     try:
         events = db.execute("SELECT event_id,status FROM events ORDER BY rowid").fetchall()
         marks = {k: json.loads(v) for k, v in db.execute("SELECT event_id,payload FROM equity")}
-        fills = {}
+        fills: dict[str, list] = {}
         for k, v in db.execute("SELECT event_id,payload FROM fills ORDER BY rowid"):
             fills.setdefault(k, []).append(json.loads(v))
         state = json.loads(db.execute("SELECT payload FROM state WHERE id=1").fetchone()[0]) if db.execute("SELECT COUNT(*) FROM state").fetchone()[0] else None

@@ -6,7 +6,6 @@ from config import (
     IV_MIN,
     IV_MAX,
     IV_SOLVER_XTOL,
-    MIN_OPTION_PRICE,
 )
 
 

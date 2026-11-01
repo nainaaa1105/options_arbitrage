@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 
 from config import FEATURE_DATASET_FILE

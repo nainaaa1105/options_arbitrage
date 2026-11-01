@@ -2,7 +2,6 @@
 import hashlib
 
 import numpy as np
-import pandas as pd
 
 RULES = ('ml', 'random', 'max_deviation', 'atm_nearest')
 REQUIRED = ('instrument_key', 'option_type', 'expiry', 'strike', 'nifty_spot', 'reference_price_deviation', 'probability')

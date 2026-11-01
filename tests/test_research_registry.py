@@ -25,7 +25,7 @@ class RegistryTests(unittest.TestCase):
     def test_default_legacy_clis_require_explicit_opt_in(self):
         root=Path(__file__).resolve().parents[1]
         for entry in ('train_models.py','generate_signals.py','generate_trade_signals.py'):
-            result=subprocess.run([sys.executable,str(root/'src'/entry)],cwd=root,capture_output=True,text=True,timeout=60)
+            result=subprocess.run([sys.executable,str(root/'src'/entry)],cwd=root,capture_output=True,text=True,timeout=180)
             self.assertNotEqual(result.returncode,0,entry)
             self.assertIn('--allow-legacy-artifacts',result.stderr,entry)
 

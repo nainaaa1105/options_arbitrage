@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 warnings.filterwarnings('ignore')
-from accuracy_v2.features import GROUPS, KEY, REQUIRED, V2_COLUMNS, build_v2_features
+from accuracy_v2.features import GROUPS, REQUIRED, V2_COLUMNS, build_v2_features
 from accuracy_v2.experiment import FORBIDDEN, assert_no_forbidden, best_threshold, make_estimator
 from robust_model_research import purged_folds
 

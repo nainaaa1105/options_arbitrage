@@ -18,7 +18,7 @@ def run(stage, daily_file, regime_dir, run_dir, output):
     chosen = frozen["chosen"]
     h = history.assign(fold=oof.fold.to_numpy(), baseline=oof["baseline_frozen"].to_numpy(), improved=oof[chosen].to_numpy())
     h = h[(h.fold >= 3) & h.improved.notna() & h.baseline.notna()].copy()      # blocks where the chosen model has out-of-fold scores
-    y = h[TARGET].astype(int)
+    h[TARGET].astype(int)
     out = {"rows_evaluated": len(h), "chosen": chosen}
     # 1. Label proximity to the decision boundary: how much of the target is decided by sub-tick or sub-spread noise?
     cur = h.absolute_price_deviation.abs()

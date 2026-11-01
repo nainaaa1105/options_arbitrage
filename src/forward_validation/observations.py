@@ -31,7 +31,7 @@ def _read_session(directory):
     try:
         events = db.execute("SELECT event_id,payload,status,detail FROM events ORDER BY rowid").fetchall()
         equity = {k: json.loads(v) for k, v in db.execute("SELECT event_id,payload FROM equity")}
-        fills = {}
+        fills: dict[str, list] = {}
         for k, v in db.execute("SELECT event_id,payload FROM fills ORDER BY rowid"):
             fills.setdefault(k, []).append(json.loads(v))
     finally:
@@ -50,7 +50,8 @@ def ingest_session(protocol, session_dir, store_path, now=None):
     events, equity, fills = _read_session(d)
     quarantine = d / "quarantine.jsonl"
     quarantined = sum(1 for l in quarantine.read_text(encoding="utf-8").splitlines() if l.strip()) if quarantine.exists() else 0
-    days, episodes = {}, []
+    days: dict[str, dict] = {}
+    episodes: list[tuple] = []
     peak, previous_equity, open_event, equity_before_open = initial, initial, None, initial
     for event_id, payload, status, detail in events:
         event = json.loads(payload)

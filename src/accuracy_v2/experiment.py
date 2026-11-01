@@ -11,7 +11,6 @@ collected after this run can confirm the result.
 import argparse
 import hashlib
 import json
-import sys
 import warnings
 from pathlib import Path
 
@@ -209,7 +208,6 @@ def run(stage, daily_file, regime_dir, output, trials=20, smoke=False):
     pd.DataFrame({"row": np.arange(len(history)), "fold": fold_of, "y": y, **{k: v for k, v in oof.items()}}).to_parquet(output / "oof_predictions.parquet")
     # ---- select, threshold/calibrate on EARLIER OOF only (V2..V3 for V4-V5 estimate), then refit and freeze
     chosen = window.index[0]
-    simple_order = ["lgb_base_features", "baseline_frozen", "lgb_v2_all", "lgb_v2_tuned"]
     print("selected:", chosen, flush=True)
     used = np.isfinite(oof[chosen]) & (fold_of >= 2)
     threshold = best_threshold(y[used & (fold_of <= 3)], oof[chosen][used & (fold_of <= 3)])
@@ -271,7 +269,7 @@ def evaluate_fresh(output, bundle, history, fresh, baseline_predictions):
     rng = np.random.default_rng(7)
     unique = np.unique(dates)
     members = [np.flatnonzero(dates == d) for d in unique]
-    diffs, aucs, accs = [], [], []
+    _diffs, aucs, accs = [], [], []
     for _ in range(2000):
         idx = np.concatenate([members[i] for i in rng.integers(0, len(members), len(members))])
         accs.append(float(((p[idx] >= .5) == y[idx]).mean() - ((bp[idx] >= .5) == y[idx]).mean()))

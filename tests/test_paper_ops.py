@@ -144,7 +144,7 @@ class LiquidationAndHealthTests(SessionCase):
         self.assertIn('stale_feed_while_exposed', {a['code'] for a in stale['alerts']})
         overdue = assess(self.session, now=pd.Timestamp('2026-11-02 10:31:00', tz=IST))
         self.assertIn('overdue_open_position', {a['code'] for a in overdue['alerts']})
-        closed = self.session.parent / 'flat'
+        self.session.parent / 'flat'
         # A flat account with the same age raises no exposure alerts.
         runner = self.open_session()
         try:

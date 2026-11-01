@@ -12,7 +12,7 @@ def bs(spot, strike, maturity, sigma, call):
         raise ValueError("Positive spot/strike/volatility and nonnegative finite maturity required")
     scale = s*torch.sqrt(t.clamp_min(1e-12))
     d1 = (torch.log(spot/strike)+.5*s*s*t)/scale
-    d2 = d1-scale
+    d1-scale
     cdf = lambda x: .5*(1+torch.erf(x/math.sqrt(2)))
     # Premium cancellation matters for low-volatility, far-OTM options. Evaluate
     # each option side directly in float64 with the normal survival function;

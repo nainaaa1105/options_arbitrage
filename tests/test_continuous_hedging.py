@@ -1,6 +1,4 @@
-import copy
 from dataclasses import replace
-import importlib
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
@@ -17,7 +15,6 @@ from continuous_hedging.objectives import cvar,entropic,risk
 from continuous_hedging.policies import ContinuousPolicy,positions
 from continuous_hedging.baselines import baseline,ww_width
 from continuous_hedging.training import fit,load
-from continuous_hedging.run import select_baselines
 from continuous_hedging.evaluation import paired_intervals
 
 

@@ -2,7 +2,6 @@
 
 import argparse
 import hashlib
-import html
 import json
 from datetime import datetime, timezone
 from pathlib import Path

@@ -21,7 +21,9 @@ def build_chosen_episodes(options, futures, config: HedgeConfig, chosen, validat
     option_rows = o.set_index(["instrument_key", "timestamp"])
     future_rows = f.set_index("timestamp")
     meta = o.drop_duplicates("instrument_key").set_index("instrument_key")
-    records, paths, skipped = [], [], []
+    records: list[dict] = []
+    paths: list[dict] = []
+    skipped: list[dict] = []
     last_exit = None
     for _, pick in chosen.sort_values("decision_time").iterrows():
         decision, key = pick.decision_time, pick.instrument_key

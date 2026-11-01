@@ -1,4 +1,3 @@
-import copy
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -17,7 +16,6 @@ from continuous_hedging.rounding import round_units,rounded_policy,rounded_basel
 from continuous_hedging.lot_training import LotPolicy,rollout,fit_lot,load_lot
 from continuous_hedging.accounting import pnl
 from continuous_hedging.worlds import calibrate,HestonPremium,WorldSampler,heston_cf,split_returns
-from continuous_hedging.phase4 import hold_diagnostic
 from continuous_hedging.sensitivity import observable_variance_proxy,execution_stresses
 
 

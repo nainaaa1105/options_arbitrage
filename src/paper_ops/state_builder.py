@@ -39,9 +39,10 @@ class CompletedBarStateBuilder:
         if self._last is not None and bar_start <= self._last[0]:
             return Unavailable(bar_start, "out_of_order_or_repeated_bar")
         available = bar_start + BAR
-        contiguous = (self._last is not None and bar_start - self._last[0] == BAR
-                      and bar_start.tz_convert("Asia/Kolkata").date() == self._last[0].tz_convert("Asia/Kolkata").date())
-        previous_spot = self._last[1] if contiguous else None
+        last = self._last
+        contiguous = (last is not None and bar_start - last[0] == BAR
+                      and bar_start.tz_convert("Asia/Kolkata").date() == last[0].tz_convert("Asia/Kolkata").date())
+        previous_spot = last[1] if (contiguous and last is not None) else None
         def usable(value):
             return isinstance(value, (int, float, np.floating)) and math.isfinite(value) and value > 0
         for name, value in (("spot", spot_close), ("option", option_close), ("future", future_close)):

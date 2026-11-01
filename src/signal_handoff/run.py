@@ -7,7 +7,6 @@ Order of operations (enforced in code):
   4. only then build paths, run the shared hedging engine and evaluate.
 """
 import argparse
-import hashlib
 import json
 import shutil
 from datetime import datetime, timezone

@@ -1,0 +1,32 @@
+# Tooling configuration only; the project is run from source (PYTHONPATH=src), not installed as a package.
+
+[tool.ruff]
+target-version = "py312"
+line-length = 160
+
+[tool.ruff.lint]
+# Correctness-focused: syntax errors and pyflakes (undefined or unused names, redefinitions). Style rules are not enforced
+# because large parts of the research code were written in a deliberately dense style.
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# These modules are hash-frozen by paper-trading protocols: editing them (even for lint) invalidates registered sessions.
+"src/deep_hedging/*" = ["F"]
+"src/forward_paper.py" = ["F"]
+"src/research_targets.py" = ["F"]
+
+[tool.coverage.run]
+source = ["src"]
+branch = false
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+show_missing = false
+skip_empty = true
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
+files = ["src/paper_ops", "src/forward_validation", "src/signal_handoff"]

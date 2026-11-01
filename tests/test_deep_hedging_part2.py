@@ -5,17 +5,15 @@ from dataclasses import replace
 from tempfile import TemporaryDirectory
 
 import numpy as np
-import pandas as pd
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from deep_hedging.simulation import MarketSpec, HestonOracle, simulate, bs_marks, heston_cf
 from deep_hedging.config import HedgeConfig
 from deep_hedging.batch_environment import BatchEnvironment, rollout_baseline
-from deep_hedging.engine import run_episode
 from deep_hedging.policy import HedgePolicy, rollout_policy, current_features, FEATURE_NAMES, load_policy
 from deep_hedging.objectives import cvar_objective, score_function_loss
-from deep_hedging.simulation_bridge import scalar_replay, episode_frame
+from deep_hedging.simulation_bridge import scalar_replay
 from deep_hedging.train import TrainingSpec, fit_seed
 from deep_hedging.metrics import empirical_loss_risk
 

@@ -13,7 +13,6 @@ import pandas as pd
 from forward_paper import inspect_session
 from quote_capture import normalize_snapshot
 from .catalog import freeze_validated
-from .contracts import needs_reroll, select_contracts
 from .market import INDEX_KEY
 from .service import LockHeld, run_cycle
 from .state_builder import CompletedBarStateBuilder, Unavailable
@@ -107,10 +106,10 @@ def run_day(base, day, market, selection, sessions, now_fn=None, sleep_fn=time.s
         snap = normalize_snapshot(payload, received, max_age_seconds=5.).set_index("instrument_key") if payload.get("data") else pd.DataFrame()
         for label, contract in selection.items():
             option_key = contract["option"]["instrument_key"]
-            states = {key: bars.get(key) for key in (INDEX_KEY, future_key, option_key)}
+            spot_bar, future_bar, option_bar = bars.get(INDEX_KEY), bars.get(future_key), bars.get(option_key)
             state = Unavailable(start, "missing_completed_bar")
-            if all(v is not None for v in states.values()):
-                state = builders[label].push(start, float(states[INDEX_KEY].close), float(states[option_key].close), float(states[future_key].close))
+            if spot_bar is not None and future_bar is not None and option_bar is not None:
+                state = builders[label].push(start, float(spot_bar.close), float(option_bar.close), float(future_bar.close))
             packet_quotes, reason = {}, None
             for asset, key in (("option", option_key), ("future", future_key)):
                 if key not in snap.index or not bool(snap.loc[key, "executable_quote_valid"]):

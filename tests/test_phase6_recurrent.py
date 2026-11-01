@@ -1,10 +1,8 @@
-from dataclasses import replace
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
 
-import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
